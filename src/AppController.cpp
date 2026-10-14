@@ -7,20 +7,52 @@
 #include "UiHelpers.h"
 
 #include <QApplication>
+#include <QAction>
+#include <QEvent>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QMenu>
+#include <QPainter>
+#include <QPalette>
+#include <QPixmap>
 #include <QStandardPaths>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
 #include <QMessageBox>
+#include <QIcon>
 #include <QRandomGenerator>
 #include <QScreen>
+#include <QSystemTrayIcon>
 #include <QDateTime>
 #include <QDebug>
 
 namespace {
 const char *kServerName = "sticky-notes-single-instance";
+
+// Monochrome note glyph for the tray, tinted with the theme foreground so it
+// matches the Plasma panel: white on the default dark theme, dark on a light
+// one. Falls back to the colored app icon if the SVG cannot be rendered.
+QIcon themedTrayIcon()
+{
+    const QPixmap mask = QIcon(QStringLiteral(":/icons/sticky-notes-symbolic.svg")).pixmap(64, 64);
+    if (mask.isNull())
+        return QIcon(QStringLiteral(":/icons/sticky-notes.png"));
+
+    QColor fg = QApplication::palette().color(QPalette::WindowText);
+    if (!fg.isValid() || fg.alpha() == 0)
+        fg = Qt::white;
+
+    QPixmap tinted(mask.size());
+    tinted.fill(Qt::transparent);
+    QPainter painter(&tinted);
+    painter.drawPixmap(0, 0, mask);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    painter.fillRect(tinted.rect(), fg);
+    painter.end();
+
+    return QIcon(tinted);
+}
 } // namespace
 
 AppController::AppController(QObject *parent)
@@ -65,7 +97,10 @@ void AppController::start()
     connect(m_hub, &HubWindow::purgeNoteRequested, this, &AppController::onPurgeNote);
     connect(m_hub, &HubWindow::purgeAllRequested, this, &AppController::onPurgeAll);
     connect(m_hub, &HubWindow::settingsChanged, this, &AppController::onSettingsChanged);
-    connect(m_hub, &HubWindow::quitRequested, this, [] { QApplication::quit(); });
+    connect(m_hub, &HubWindow::quitRequested, this, &AppController::onQuitRequested);
+
+    setupTray();
+    updateTrayVisibility();
 
     for (const Note &n : Storage::instance().notes(false))
         if (n.visible)
@@ -275,6 +310,65 @@ void AppController::onSettingsChanged()
     for (NoteWindow *w : std::as_const(m_windows))
         w->applyTheme(Storage::instance().note(w->noteId()).themeId);
     applyAutostart();
+    updateTrayVisibility();
+}
+
+bool AppController::closeToTrayEnabled() const
+{
+    return Storage::instance().setting(QStringLiteral("close_to_tray"), QStringLiteral("0")) == QLatin1String("1")
+           && m_tray && m_tray->isVisible();
+}
+
+void AppController::onQuitRequested()
+{
+    // Closing the hub (X) or the "Quit app" button only hides it when the
+    // "close to tray" option is on: the tray menu offers the real quit.
+    if (closeToTrayEnabled()) {
+        if (m_hub)
+            m_hub->hide();
+        return;
+    }
+    QApplication::quit();
+}
+
+void AppController::setupTray()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable())
+        return;
+
+    m_tray = new QSystemTrayIcon(themedTrayIcon(), this);
+    m_tray->setToolTip(QStringLiteral("Sticky Notes"));
+
+    // Follow Plasma color-scheme changes: retint the glyph with the new
+    // foreground color (white on dark, dark on light).
+    qApp->installEventFilter(this);
+
+    auto *menu = new QMenu(m_hub);
+    QAction *show = menu->addAction(I18n::t(QStringLiteral("app.tray_show")));
+    connect(show, &QAction::triggered, this, &AppController::showHub);
+    menu->addSeparator();
+    QAction *quit = menu->addAction(I18n::t(QStringLiteral("app.quit")));
+    connect(quit, &QAction::triggered, this, [] { QApplication::quit(); });
+    m_tray->setContextMenu(menu);
+
+    connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
+            showHub();
+    });
+}
+
+void AppController::updateTrayVisibility()
+{
+    if (!m_tray)
+        return;
+    m_tray->setVisible(Storage::instance().setting(QStringLiteral("close_to_tray"), QStringLiteral("0")) == QLatin1String("1"));
+}
+
+bool AppController::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::ApplicationPaletteChange && m_tray)
+        m_tray->setIcon(themedTrayIcon());
+    return QObject::eventFilter(watched, event);
 }
 
 void AppController::applyAutostart()

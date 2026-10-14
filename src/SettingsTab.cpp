@@ -86,6 +86,8 @@ void SettingsTab::buildUi()
 
     m_autostart = new QCheckBox(I18n::t(QStringLiteral("settings.autostart")));
     m_confirmDelete = new QCheckBox(I18n::t(QStringLiteral("settings.confirm_delete")));
+    m_closeToTray = new QCheckBox(I18n::t(QStringLiteral("settings.close_to_tray")));
+    m_closeToTray->setToolTip(I18n::t(QStringLiteral("settings.close_to_tray_tooltip")));
 
     form->addRow(I18n::t(QStringLiteral("settings.default_theme")), m_defaultTheme);
     form->addRow(I18n::t(QStringLiteral("settings.default_position")), m_defaultLayer);
@@ -110,6 +112,7 @@ void SettingsTab::buildUi()
 
     form->addRow(QString(), m_autostart);
     form->addRow(QString(), m_confirmDelete);
+    form->addRow(QString(), m_closeToTray);
 
     auto *path = new QLabel(I18n::t(QStringLiteral("settings.data_path"))
                                 .arg(Storage::instance().databasePath()));
@@ -172,6 +175,7 @@ void SettingsTab::buildUi()
         Storage::instance().setSetting(QStringLiteral("date_format"), m_dateFormat->text().trimmed());
         Storage::instance().setSetting(QStringLiteral("autostart"), m_autostart->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         Storage::instance().setSetting(QStringLiteral("confirm_delete"), m_confirmDelete->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
+        Storage::instance().setSetting(QStringLiteral("close_to_tray"), m_closeToTray->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         emit settingsChanged();
     };
     // currentIndexChanged does not fire when the user re-selects the already
@@ -191,6 +195,7 @@ void SettingsTab::buildUi()
     });
     connect(m_autostart, &QCheckBox::toggled, this, persist);
     connect(m_confirmDelete, &QCheckBox::toggled, this, persist);
+    connect(m_closeToTray, &QCheckBox::toggled, this, persist);
 
     // Language change needs a restart: save and relaunch with "--restart" so the
     // new process skips the single-instance probe.
@@ -340,6 +345,7 @@ void SettingsTab::loadIntoUi()
     QSignalBlocker bDate(m_dateFormat);
     QSignalBlocker bAuto(m_autostart);
     QSignalBlocker bConfirm(m_confirmDelete);
+    QSignalBlocker bCloseTray(m_closeToTray);
     QSignalBlocker bList(m_themeList);
 
     // language selector: "System" (resolved at startup) + the discovered ones
@@ -380,6 +386,7 @@ void SettingsTab::loadIntoUi()
     m_dateFormat->setText(Storage::instance().setting(QStringLiteral("date_format"), UiHelpers::defaultDateFormat()));
     m_autostart->setChecked(Storage::instance().setting(QStringLiteral("autostart"), QStringLiteral("0")) == QLatin1String("1"));
     m_confirmDelete->setChecked(Storage::instance().setting(QStringLiteral("confirm_delete"), QStringLiteral("1")) != QLatin1String("0"));
+    m_closeToTray->setChecked(Storage::instance().setting(QStringLiteral("close_to_tray"), QStringLiteral("0")) == QLatin1String("1"));
 
     // theme list
     const QString keep = m_editingThemeId;

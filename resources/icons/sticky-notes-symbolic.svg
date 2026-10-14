@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Monochrome sticky-note glyph. Drawn in solid black so it can be tinted
+       with the active theme foreground color at runtime (white on Plasma's
+       dark theme). -->
+  <rect x="3.5" y="2.5" width="17" height="19" rx="2.5" ry="2.5"
+        fill="none" stroke="#000000" stroke-width="1.8"/>
+  <line x1="3.5" y1="8" x2="20.5" y2="8" stroke="#000000" stroke-width="1.8"/>
+  <line x1="7" y1="12" x2="17" y2="12" stroke="#000000" stroke-width="1.6" stroke-linecap="round"/>
+  <line x1="7" y1="15.5" x2="17" y2="15.5" stroke="#000000" stroke-width="1.6" stroke-linecap="round"/>
+  <line x1="7" y1="19" x2="13" y2="19" stroke="#000000" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

@@ -40,10 +40,12 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   date formatting) live in `UiHelpers`. `Themes` = builtin palette; `I18n` =
   runtime translations (symbolic keys, `resources/i18n/*.json`), selected by the
   `language` setting and applied at the next start.
-- Closing the hub quits the app (same as *Esci dall'app*): `HubWindow::closeEvent()`
-  emits `quitRequested` so the X button does not strand the app with note windows
-  and no tray. `setQuitOnLastWindowClosed(false)` is kept so hiding a note window
-  never quits the app.
+- Closing the hub (X or *Quit app*) quits the app by default: `HubWindow::closeEvent()`
+  emits `quitRequested`, and `AppController::onQuitRequested()` decides what that
+  means. With the **Close to system tray** setting the hub is only hidden instead
+  and a `QSystemTrayIcon` (with *Show window* / *Quit app*) provides a way back.
+  `setQuitOnLastWindowClosed(false)` is kept so hiding a note window never quits
+  the app.
 - Single instance via a `QLocalServer` named `sticky-notes-single-instance`: a
   second launch tells the running instance to show the hub, then exits 0.
 

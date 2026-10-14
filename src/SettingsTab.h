@@ -48,6 +48,7 @@ private:
     QLineEdit *m_dateFormat = nullptr;
     QCheckBox *m_autostart = nullptr;
     QCheckBox *m_confirmDelete = nullptr;
+    QCheckBox *m_closeToTray = nullptr;
 
     // theme editor
     QListWidget *m_themeList = nullptr;

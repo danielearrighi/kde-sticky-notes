@@ -45,10 +45,9 @@ HubWindow::HubWindow(QWidget *parent)
 
 void HubWindow::closeEvent(QCloseEvent *event)
 {
-    // The hub is the only "normal" window and there is no tray icon: if we hid
-    // it, a hidden window would also disappear from the taskbar and there would
-    // be no way left to reopen it or quit the app. Closing with the X therefore
-    // is equivalent to "Quit app".
+    // The hub is the only "normal" window. AppController decides what closing
+    // means: quit the app, or (with "close to tray") just hide it, since the
+    // tray icon then provides a way back to the hub and a real quit.
     event->accept();
     emit quitRequested();
 }

@@ -42,6 +42,8 @@ the note grid, trash and settings.
 - Optional **autostart** (`~/.config/autostart/sticky-notes.desktop`).
 - Closing the hub (X) quits the app, like **Quit app**: the notes are saved and
   reappear at the next launch.
+- Optional **close to system tray**: when enabled, closing the hub (X or *Quit
+  app*) keeps Sticky Notes running with a tray icon (*Show window* / *Quit app*).
 
 ### Languages
 - UI in **English** (source and default) or **Italian**, selected in the settings
@@ -207,7 +209,8 @@ AppImage/Flatpak too).
   client.
 - **Distribution**: AppImage and Flatpak are missing (the user install script is
   ready).
-- **Tray** in the notification area not implemented (the taskbar icon is used).
+- **Tray** icon: provided by the *close to system tray* option (off by default;
+  the taskbar icon is used otherwise).
 - Keyboard shortcuts in the note body not present yet.
 - With the app not installed a harmless XDG portal warning appears
   (`App info not found for 'sticky-notes'`): it disappears after

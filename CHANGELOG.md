@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- **Close to system tray** (settings option, off by default): when enabled,
+  closing the hub (X or *Quit app*) keeps Sticky Notes running and shows a
+  `QSystemTrayIcon` with *Show window* and *Quit app*. If the tray is not
+  available, closing quits as before.
 - **Internationalization**: the UI uses **symbolic keys**
   (`I18n::t("settings.title")`) with **English** as the source/fallback
   (`en.json`) and **Italian** included as a translation (`resources/i18n/*.json`,
@@ -86,4 +90,4 @@ First working version (KDE Plasma / Wayland).
 - KDE/Wayland only with layer-shell support (GNOME and X11 excluded).
 - Multi-monitor not handled yet (anchored to the top-left edge).
 - Order among notes of the same layer not controllable.
-- AppImage/Flatpak packaging and a tray icon not present yet.
+- AppImage/Flatpak packaging not present yet.

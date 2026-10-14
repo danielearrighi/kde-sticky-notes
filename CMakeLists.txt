@@ -37,6 +37,7 @@ qt_add_resources(sticky-notes "app_resources"
     PREFIX "/"
     BASE resources
     FILES resources/icons/sticky-notes.png
+          resources/icons/sticky-notes-symbolic.svg
           ${I18N_JSON}
 )
 
