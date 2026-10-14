@@ -37,6 +37,13 @@ constexpr int kTitleHeight = 30;
 constexpr int kResizeGrip = 16;
 constexpr int kMinW = 160;
 constexpr int kMinH = 120;
+// Inner padding of the note body. The same value is used for QTextDocument's
+// margin (= top/left/right/bottom padding of the text) and for the extra
+// bottom padding of the editor (see applyStyle()): without it, when the caret
+// reaches the last line QTextEdit scrolls the document's bottom margin out of
+// view and the text touches the bottom border.
+constexpr int kBodyPadding = 10;
+constexpr qreal kListIndentWidth = 25; //Default QTextListFormat indent.
 
 QIcon colorIcon(const QString &hex)
 {
@@ -123,7 +130,8 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_body->setFrameShape(QFrame::NoFrame);
     m_body->setAcceptRichText(true);
     m_body->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_body->document()->setDocumentMargin(10);
+    m_body->document()->setDocumentMargin(kBodyPadding);
+    m_body->document()->setIndentWidth(kListIndentWidth);
 
     root->addWidget(m_titleBar);
     root->addWidget(m_body, 1);
@@ -377,14 +385,43 @@ void NoteWindow::applyStyle()
                       "#titleBar { background-color: %2; }"
                       "#titleText { color: %3; font-weight: bold; }"
                       "#titleEdit { color: %3; background: transparent; border: none; font-weight: bold; }"
-                      "#resizeGrip { color: %3; background: transparent; font-size: 10px; }"
+                      "#resizeGrip { color: %2; background: transparent; font-size: 10px; }"
                       "#collapseButton, #closeButton { color: %3; background: transparent;"
                       " border: none; font-size: 12px; font-weight: bold; }"
                       "#collapseButton:hover, #closeButton:hover {"
                       " background-color: rgba(0, 0, 0, 40); border-radius: 4px; }"
                       "#closeButton:hover { background-color: rgba(190, 40, 40, 200); color: #ffffff; }"
-                      "#body { background: transparent; border: none; color: %3; }")
-                      .arg(m_theme.body, m_theme.titleBar, m_theme.text));
+                      // The bottom padding is applied here (not as a document
+                      // margin) so it survives when QTextEdit scrolls the caret
+                      // into view: the document margin alone is scrolled off and
+                      // the last line would touch the bottom border.
+                      "#body { background: transparent; border: none; color: %3;"
+                      " padding-bottom: %5px; }"
+                      // Scrollbars: track in the note background colour, handle in the
+                      // title bar colour, so they blend with the note instead of the
+                      // default dark/blue platform style. The top/bottom/right insets
+                      // are done with borders (not margin): a margin would leave the
+                      // area unpainted, showing the platform's black base style. The
+                      // %4 bottom/right border (= kResizeGrip) keeps both bars clear of
+                      // the bottom-right resize grip; the 8px top border is just spacing.
+                      "#body QScrollBar:vertical { background: %1; width: 5px;"
+                      " border: 0; border-top: 8px solid %1; border-bottom: %4px solid %1; }"
+                      "#body QScrollBar::handle:vertical { background: %2; min-height: 24px;"
+                      " border-radius: 2px; }"
+                      "#body QScrollBar::add-line:vertical, #body QScrollBar::sub-line:vertical {"
+                      " height: 0; background: none; }"
+                      "#body QScrollBar::add-page:vertical, #body QScrollBar::sub-page:vertical {"
+                      " background: none; }"
+                      "#body QScrollBar:horizontal { background: %1; height: 5px;"
+                      " border: 0; border-right: %4px solid %1; }"
+                      "#body QScrollBar::handle:horizontal { background: %2; min-width: 24px;"
+                      " border-radius: 2px; }"
+                      "#body QScrollBar::add-line:horizontal, #body QScrollBar::sub-line:horizontal {"
+                      " width: 0; background: none; }"
+                      "#body QScrollBar::add-page:horizontal, #body QScrollBar::sub-page:horizontal {"
+                      " background: none; }")
+                      .arg(m_theme.body, m_theme.titleBar, m_theme.text,
+                           QString::number(kResizeGrip), QString::number(kBodyPadding)));
 
     QFont f(fontFamily, fontSize);
     QFont ft(fontFamily, fontSize);

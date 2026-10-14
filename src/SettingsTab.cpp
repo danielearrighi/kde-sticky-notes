@@ -145,10 +145,12 @@ void SettingsTab::buildUi()
 
     m_themeNew = UiHelpers::makeCardButton(I18n::t(QStringLiteral("settings.theme_new")));
     m_themeDelete = UiHelpers::makeCardButton(I18n::t(QStringLiteral("delete")));
+    m_themeRestore = UiHelpers::makeCardButton(I18n::t(QStringLiteral("restore")));
     m_themeSave = UiHelpers::makeCardButton(I18n::t(QStringLiteral("settings.theme_save")));
     auto *buttons = new QHBoxLayout;
     buttons->addWidget(m_themeNew);
     buttons->addWidget(m_themeDelete);
+    buttons->addWidget(m_themeRestore);
     buttons->addStretch();
     buttons->addWidget(m_themeSave);
     editor->addRow(QString(), buttons);
@@ -207,6 +209,7 @@ void SettingsTab::buildUi()
     connect(m_themeTitle, &QPushButton::clicked, this, [this] { pickColorFor(m_themeTitle); });
     connect(m_themeText, &QPushButton::clicked, this, [this] { pickColorFor(m_themeText); });
     connect(m_themeSave, &QPushButton::clicked, this, &SettingsTab::saveCurrentTheme);
+    connect(m_themeRestore, &QPushButton::clicked, this, &SettingsTab::restoreCurrentTheme);
     connect(m_themeNew, &QPushButton::clicked, this, [this] {
         Theme t;
         t.id = QStringLiteral("tema-") + QString::number(QDateTime::currentMSecsSinceEpoch());
@@ -291,6 +294,33 @@ void SettingsTab::saveCurrentTheme()
     t.body = m_themeBody->property("hex").toString();
     t.titleBar = m_themeTitle->property("hex").toString();
     t.text = m_themeText->property("hex").toString();
+    Storage::instance().upsertTheme(t);
+    refresh();
+    emit settingsChanged();
+}
+
+void SettingsTab::restoreCurrentTheme()
+{
+    if (m_editingThemeId.isEmpty())
+        return;
+    Theme t = Storage::instance().theme(m_editingThemeId);
+    if (!t.isValid())
+        return;
+    // Built-in themes have a pristine definition in Themes::defaults(): put back
+    // the original name and colors, undoing the user's edits. Custom themes have
+    // no factory values, so restoring simply reloads the last saved state and
+    // discards any unsaved edits in the editor.
+    if (t.builtin) {
+        for (const Theme &d : Themes::defaults())
+            if (d.id == t.id) {
+                t.name = d.name;
+                t.body = d.body;
+                t.titleBar = d.titleBar;
+                t.text = d.text;
+                t.sort = d.sort;
+                break;
+            }
+    }
     Storage::instance().upsertTheme(t);
     refresh();
     emit settingsChanged();

@@ -12,6 +12,9 @@
   applied in C++). The settings have a **language selector** (*System* + the
   available languages) and a **Restart now** button: the choice is applied at the
   next start. Built-in theme names are translated at display time.
+- **Restore theme**: the theme editor has a **Restore** (*Ripristina*) button that
+  puts the selected built-in theme back to its factory colors (and name), undoing
+  the user's edits; for custom themes it reloads the last saved state.
 - **Focused note in the foreground**: the note that has keyboard focus stays in
   front of normal windows even when it is set *on the desktop* (*bottom* layer).
   When focus moves elsewhere it returns to the configured layer, after a short
@@ -28,6 +31,13 @@
 - **Defaults** for a new database: **Random** theme, **on the desktop** position
   (*bottom* layer), **230×190 px** size, **DejaVu Sans** font (if available) at
   **9 pt**.
+
+### Fixed
+- **Note body bottom padding**: when the text reached the end of the note,
+  `QTextEdit` scrolled the document's bottom margin out of view to keep the
+  caret visible, so the last line touched the bottom border. The body now has a
+  bottom padding equal to the text margin used at the top, applied through the
+  stylesheet so it survives scrolling while editing.
 
 ## 0.1.0
 

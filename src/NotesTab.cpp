@@ -100,18 +100,18 @@ void NotesTab::refresh()
         sn->setAlignment(Qt::AlignTop | Qt::AlignLeft);
 
         auto *buttons = new QHBoxLayout;
-        auto *open = UiHelpers::makeCardButton(I18n::t(QStringLiteral("open")));
+        auto *showBtn = UiHelpers::makeCardButton(I18n::t(QStringLiteral("notes.show")));
         auto *vis = UiHelpers::makeCardButton(n.visible ? I18n::t(QStringLiteral("hide"))
                                                         : I18n::t(QStringLiteral("show")));
         auto *del = UiHelpers::makeCardButton(I18n::t(QStringLiteral("delete")));
-        buttons->addWidget(open);
+        buttons->addWidget(showBtn);
         buttons->addWidget(vis);
         buttons->addStretch();
         buttons->addWidget(del);
 
         const qint64 id = n.id;
         const bool visible = n.visible;
-        connect(open, &QPushButton::clicked, this, [this, id] { emit openNoteRequested(id); });
+        connect(showBtn, &QPushButton::clicked, this, [this, id] { emit openNoteRequested(id); });
         connect(vis, &QPushButton::clicked, this, [this, id, visible] {
             emit noteVisibilityToggled(id, !visible);
         });

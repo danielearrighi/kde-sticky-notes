@@ -31,6 +31,7 @@ private:
     void loadIntoUi();
     void loadThemeIntoEditor(const QString &themeId);
     void saveCurrentTheme();
+    void restoreCurrentTheme();
     void pickColorFor(QPushButton *button);
     static void applyColorToButton(QPushButton *b, const QString &hex);
 
@@ -56,6 +57,7 @@ private:
     QPushButton *m_themeText = nullptr;
     QPushButton *m_themeNew = nullptr;
     QPushButton *m_themeDelete = nullptr;
+    QPushButton *m_themeRestore = nullptr;
     QPushButton *m_themeSave = nullptr;
     QString m_editingThemeId;
 };
