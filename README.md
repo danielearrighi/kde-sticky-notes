@@ -5,6 +5,8 @@ surfaces**: no decorations, **outside the taskbar** and **outside Alt+Tab**,
 freely positionable on the desktop. An icon in the taskbar opens the **hub** with
 the note grid, trash and settings.
 
+![Sticky Notes: colored notes on the desktop and the hub with the note grid](screens/screenshot.png)
+
 ---
 
 ## Features
