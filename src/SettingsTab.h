@@ -5,6 +5,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
@@ -34,6 +35,9 @@ private:
     static void applyColorToButton(QPushButton *b, const QString &hex);
 
     // general preferences
+    QComboBox *m_language = nullptr;
+    QPushButton *m_restart = nullptr;
+    QLabel *m_languageHint = nullptr;
     QComboBox *m_defaultTheme = nullptr;
     QComboBox *m_defaultLayer = nullptr;
     QSpinBox *m_defaultWidth = nullptr;

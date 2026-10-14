@@ -5,8 +5,6 @@ surfaces**: no decorations, **outside the taskbar** and **outside Alt+Tab**,
 freely positionable on the desktop. An icon in the taskbar opens the **hub** with
 the note grid, trash and settings.
 
-![Sticky Notes](docs/screenshot.png)
-
 ---
 
 ## Features
@@ -42,6 +40,13 @@ the note grid, trash and settings.
 - Optional **autostart** (`~/.config/autostart/sticky-notes.desktop`).
 - Closing the hub (X) quits the app, like **Quit app**: the notes are saved and
   reappear at the next launch.
+
+### Languages
+- UI in **English** (source and default) or **Italian**, selected in the settings
+  (*System*, *English*, *Italiano*). The change applies at the **next start**: the
+  selector offers a *Restart now* button.
+- Strings use **symbolic keys** (`I18n::t("settings.title")`); `en.json` is always
+  installed as the base, so a missing key falls back to English.
 
 ---
 
@@ -134,7 +139,7 @@ Path: `~/.local/share/StickyNotes/notes.db` (SQLite).
 | `settings` | `key, value` |
 
 Settings keys: `default_theme`, `default_layer`, `font_family`, `font_size`,
-`autostart`, `confirm_delete`.
+`date_format`, `autostart`, `confirm_delete`, `language`.
 
 Deleting a note moves it to the **trash** (`deleted = 1`); permanent deletion
 removes the row.
@@ -153,9 +158,11 @@ rm ~/.local/share/StickyNotes/notes.db
 src/Models.h          Note and Theme structures
 src/Storage.*         SQLite: notes, themes, settings
 src/Themes.*          default post-it palette
+src/I18n.*            runtime translations (symbolic keys + JSON per language, English fallback)
 src/NoteWindow.*      layer-shell note window (title, Markdown, menu, drag/resize)
 src/HubWindow.*       hub: grid, trash, settings, theme editor
 src/AppController.*   orchestration, single instance, autostart
+resources/i18n/       translations (en.json, it.json)
 resources/icons/      app icon
 packaging/            .desktop and install script
 docs/                 screenshot and technical notes
@@ -163,11 +170,20 @@ docs/                 screenshot and technical notes
 
 ---
 
-## Technical notes
+## Adding a language
 
-See [`docs/wayland-layer-shell.md`](docs/wayland-layer-shell.md) for the details
-(differences between XWayland and layer-shell, the `globalPosition()` trap,
-diagnostics). In short:
+Translations are one JSON file per language under `resources/i18n/`, embedded in
+the binary as Qt resources (`:/i18n/<code>.json`). Keys are **symbolic,
+lowercase, dot-grouped identifiers** (`"settings.title"`, `"note.delete"`, …) and
+values are **plain text with no HTML** (bold/italic are applied in C++ with
+`QFont`). Drop `resources/i18n/xx.json` with a `_meta` object
+(`{"code": "xx", "name": "<native name>"}`) plus the translated values and
+rebuild. `en.json` is always installed as the **base translator** and the selected
+language on top of it, so a missing key falls back to English. The JSON is
+**embedded in the binary**, so there is nothing extra to ship (it works with
+AppImage/Flatpak too).
+
+## Technical notesk
 
 - On Wayland a normal window **cannot** choose its own position nor exclude
   itself from the taskbar. **Layer-shell** surfaces do so by definition.

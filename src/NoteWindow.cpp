@@ -1,5 +1,8 @@
 #include "NoteWindow.h"
+#include "I18n.h"
 #include "Storage.h"
+#include "Themes.h"
+#include "UiHelpers.h"
 
 #include <LayerShellQt/window.h>
 
@@ -60,7 +63,8 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     : QWidget(parent)
     , m_note(note)
 {
-    setWindowTitle(note.title.isEmpty() ? QStringLiteral("Nota") : note.title);
+    setWindowTitle(note.title.isEmpty() ? I18n::t(QStringLiteral("note.default_title"))
+                                        : note.title);
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName(QStringLiteral("noteWindow"));
     setFocusPolicy(Qt::StrongFocus);
@@ -96,7 +100,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_collapseButton->setFocusPolicy(Qt::NoFocus);
     m_collapseButton->setFixedSize(20, 20);
     m_collapseButton->setCursor(Qt::PointingHandCursor);
-    m_collapseButton->setToolTip(QStringLiteral("Riduci a icona"));
+    m_collapseButton->setToolTip(I18n::t(QStringLiteral("note.minimize")));
 
     // delete button: moves the note to the trash
     m_closeButton = new QToolButton(m_titleBar);
@@ -106,7 +110,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_closeButton->setFocusPolicy(Qt::NoFocus);
     m_closeButton->setFixedSize(20, 20);
     m_closeButton->setCursor(Qt::PointingHandCursor);
-    m_closeButton->setToolTip(QStringLiteral("Elimina nota"));
+    m_closeButton->setToolTip(I18n::t(QStringLiteral("note.delete")));
 
     bar->addWidget(m_titleLabel, 1);
     bar->addWidget(m_titleEdit, 1);
@@ -347,7 +351,7 @@ void NoteWindow::activate()
 void NoteWindow::refreshTitleLabel()
 {
     const QString t = m_note.title.trimmed();
-    m_titleLabel->setText(t.isEmpty() ? QStringLiteral("(senza titolo)") : t);
+    m_titleLabel->setText(t.isEmpty() ? UiHelpers::untitled() : t);
     if (m_titleEdit->isVisible())
         m_titleEdit->setText(m_note.title);
 }
@@ -413,7 +417,8 @@ void NoteWindow::commitTitleEdit()
     m_titleEdit->hide();
     m_titleLabel->show();
     refreshTitleLabel();
-    setWindowTitle(m_note.title.isEmpty() ? QStringLiteral("Nota") : m_note.title);
+    setWindowTitle(m_note.title.isEmpty() ? I18n::t(QStringLiteral("note.default_title"))
+                                          : m_note.title);
     m_note.content = m_body->document()->toMarkdown();
     emit contentEdited(m_note.id, m_note.title, m_note.content);
     m_body->setFocus();
@@ -430,8 +435,8 @@ void NoteWindow::applyCollapsedVisuals()
     m_resizeGrip->setVisible(!m_collapsed);
     m_collapseButton->setText(m_collapsed ? QStringLiteral("\u25a1")   // □ ripristina
                                           : QStringLiteral("_"));
-    m_collapseButton->setToolTip(m_collapsed ? QStringLiteral("Ripristina")
-                                             : QStringLiteral("Riduci a icona"));
+    m_collapseButton->setToolTip(m_collapsed ? I18n::t(QStringLiteral("restore"))
+                                             : I18n::t(QStringLiteral("note.minimize")));
 }
 
 void NoteWindow::toggleCollapse()
@@ -638,41 +643,41 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     QMenu menu;
     const QTextCharFormat cur = m_body->currentCharFormat();
 
-    QAction *bold = menu.addAction(QStringLiteral("Grassetto"));
+    QAction *bold = menu.addAction(I18n::t(QStringLiteral("format.bold")));
     bold->setShortcut(QKeySequence::Bold);
     bold->setCheckable(true);
     bold->setChecked(cur.fontWeight() == QFont::Bold);
     connect(bold, &QAction::triggered, this, &NoteWindow::toggleBold);
 
-    QAction *ital = menu.addAction(QStringLiteral("Corsivo"));
+    QAction *ital = menu.addAction(I18n::t(QStringLiteral("format.italic")));
     ital->setShortcut(QKeySequence::Italic);
     ital->setCheckable(true);
     ital->setChecked(cur.fontItalic());
     connect(ital, &QAction::triggered, this, &NoteWindow::toggleItalic);
 
-    QAction *under = menu.addAction(QStringLiteral("Sottolineato"));
+    QAction *under = menu.addAction(I18n::t(QStringLiteral("format.underline")));
     under->setShortcut(QKeySequence::Underline);
     under->setCheckable(true);
     under->setChecked(cur.fontUnderline());
     connect(under, &QAction::triggered, this, &NoteWindow::toggleUnderline);
 
-    QAction *strike = menu.addAction(QStringLiteral("Barrato"));
+    QAction *strike = menu.addAction(I18n::t(QStringLiteral("format.strikethrough")));
     strike->setCheckable(true);
     strike->setChecked(cur.fontStrikeOut());
     connect(strike, &QAction::triggered, this, &NoteWindow::toggleStrike);
 
     menu.addSeparator();
-    connect(menu.addAction(QStringLiteral("Elenco puntato")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("format.bulleted_list"))), &QAction::triggered,
             this, [this] { makeList(false); });
-    connect(menu.addAction(QStringLiteral("Elenco numerato")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("format.numbered_list"))), &QAction::triggered,
             this, [this] { makeList(true); });
-    connect(menu.addAction(QStringLiteral("Rimuovi formattazione")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("format.clear"))), &QAction::triggered,
             this, &NoteWindow::clearFormatting);
 
     menu.addSeparator();
-    QMenu *colors = menu.addMenu(QStringLiteral("Colore nota"));
+    QMenu *colors = menu.addMenu(I18n::t(QStringLiteral("note.color")));
     for (const Theme &t : Storage::instance().themes()) {
-        QAction *a = colors->addAction(colorIcon(t.body), t.name);
+        QAction *a = colors->addAction(colorIcon(t.body), Themes::displayName(t));
         a->setCheckable(true);
         a->setChecked(t.id == m_note.themeId);
         const QString id = t.id;
@@ -682,7 +687,7 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         });
     }
 
-    QAction *ontop = menu.addAction(QStringLiteral("Sempre in primo piano"));
+    QAction *ontop = menu.addAction(I18n::t(QStringLiteral("note.always_on_top")));
     ontop->setCheckable(true);
     ontop->setChecked(isAlwaysOnTop());
     connect(ontop, &QAction::triggered, this, [this] {
@@ -692,17 +697,17 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     });
 
     menu.addSeparator();
-    connect(menu.addAction(QStringLiteral("Nuova nota")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("new_note"))), &QAction::triggered,
             this, &NoteWindow::newNoteRequested);
-    connect(menu.addAction(QStringLiteral("Duplica")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("note.duplicate"))), &QAction::triggered,
             this, [this] { emit duplicateRequested(m_note.id); });
-    connect(menu.addAction(QStringLiteral("Nascondi nota")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("note.hide"))), &QAction::triggered,
             this, [this] { emit hideRequested(m_note.id); });
 
     menu.addSeparator();
-    connect(menu.addAction(QStringLiteral("Elimina (nel cestino)")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("note.delete_to_trash"))), &QAction::triggered,
             this, [this] { emit deleteRequested(m_note.id); });
-    connect(menu.addAction(QStringLiteral("Impostazioni\u2026")), &QAction::triggered,
+    connect(menu.addAction(I18n::t(QStringLiteral("note.settings"))), &QAction::triggered,
             this, &NoteWindow::settingsRequested);
 
     menu.exec(globalPos);

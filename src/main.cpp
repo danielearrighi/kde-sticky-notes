@@ -6,6 +6,8 @@
 #include <QDebug>
 
 #include "AppController.h"
+#include "I18n.h"
+#include "Storage.h"
 
 namespace {
 const char *kServerName = "sticky-notes-single-instance";
@@ -24,7 +26,9 @@ int main(int argc, char **argv)
                << "screen:" << QGuiApplication::primaryScreen()->geometry();
 
     // Single instance: if an instance is already running, ask it to show the hub and exit.
-    {
+    // A "--restart" launch skips the probe: it must always start, otherwise it
+    // would forward "show" to the previous (dying) instance instead.
+    if (!QCoreApplication::arguments().contains(QStringLiteral("--restart"))) {
         QLocalSocket probe;
         probe.connectToServer(QString::fromLatin1(kServerName));
         if (probe.waitForConnected(300)) {
@@ -39,9 +43,11 @@ int main(int argc, char **argv)
     QString error;
     if (!controller.init(&error)) {
         QMessageBox::critical(nullptr, QStringLiteral("Sticky Notes"),
-                              QStringLiteral("Impossibile aprire il database:\n%1").arg(error));
+                              I18n::t(QStringLiteral("app.db_error")).arg(error));
         return 1;
     }
+
+    I18n::applyLanguage(Storage::instance().setting(QStringLiteral("language"), QStringLiteral("en")));
 
     QString serverError;
     if (!controller.listenForSecondInstance(&serverError))

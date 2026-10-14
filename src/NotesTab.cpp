@@ -1,9 +1,11 @@
 #include "NotesTab.h"
 
+#include "I18n.h"
 #include "Storage.h"
 #include "Themes.h"
 #include "UiHelpers.h"
 
+#include <QFont>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -20,10 +22,16 @@ NotesTab::NotesTab(QWidget *parent)
     root->setSpacing(10);
 
     auto *head = new QHBoxLayout;
-    auto *title = new QLabel(QStringLiteral("<b>Le tue note</b>"));
-    auto *add = UiHelpers::makeCardButton(QStringLiteral("+  Nuova nota"));
+    auto *title = new QLabel(I18n::t(QStringLiteral("notes.your_notes")));
+    {
+        QFont titleFont = title->font();
+        titleFont.setBold(true);
+        title->setFont(titleFont);
+    }
+    auto *add = UiHelpers::makeCardButton(QStringLiteral("+  ")
+                                          + I18n::t(QStringLiteral("new_note")));
     connect(add, &QPushButton::clicked, this, &NotesTab::newNoteRequested);
-    auto *quit = UiHelpers::makeCardButton(QStringLiteral("Esci dall'app"));
+    auto *quit = UiHelpers::makeCardButton(I18n::t(QStringLiteral("app.quit")));
     connect(quit, &QPushButton::clicked, this, &NotesTab::quitRequested);
     head->addWidget(title);
     head->addStretch();
@@ -31,9 +39,7 @@ NotesTab::NotesTab(QWidget *parent)
     head->addWidget(quit);
     root->addLayout(head);
 
-    auto *hint = new QLabel(QStringLiteral(
-        "Le note restano sul desktop e non compaiono nella barra delle applicazioni. "
-        "Trascinale dalla barra del titolo; tasto destro per formattazione e colore."));
+    auto *hint = new QLabel(I18n::t(QStringLiteral("notes.hint")));
     hint->setWordWrap(true);
     hint->setEnabled(false);
     root->addWidget(hint);
@@ -49,7 +55,7 @@ NotesTab::NotesTab(QWidget *parent)
     m_grid->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     scroll->setWidget(container);
 
-    m_empty = new QLabel(QStringLiteral("Nessuna nota. Creane una con \u201c+ Nuova nota\u201d."));
+    m_empty = new QLabel(I18n::t(QStringLiteral("notes.empty")));
     m_empty->setAlignment(Qt::AlignCenter);
     m_empty->setEnabled(false);
 
@@ -86,7 +92,7 @@ void NotesTab::refresh()
 
         auto *tt = new QLabel(QStringLiteral("<b>%1</b>")
                                   .arg(n.title.trimmed().isEmpty()
-                                           ? QStringLiteral("(senza titolo)")
+                                           ? UiHelpers::untitled()
                                            : n.title.toHtmlEscaped()));
         tt->setTextFormat(Qt::RichText);
         auto *sn = new QLabel(UiHelpers::plainSnippet(n.content));
@@ -94,10 +100,10 @@ void NotesTab::refresh()
         sn->setAlignment(Qt::AlignTop | Qt::AlignLeft);
 
         auto *buttons = new QHBoxLayout;
-        auto *open = UiHelpers::makeCardButton(QStringLiteral("Apri"));
-        auto *vis = UiHelpers::makeCardButton(n.visible ? QStringLiteral("Nascondi")
-                                                        : QStringLiteral("Mostra"));
-        auto *del = UiHelpers::makeCardButton(QStringLiteral("Elimina"));
+        auto *open = UiHelpers::makeCardButton(I18n::t(QStringLiteral("open")));
+        auto *vis = UiHelpers::makeCardButton(n.visible ? I18n::t(QStringLiteral("hide"))
+                                                        : I18n::t(QStringLiteral("show")));
+        auto *del = UiHelpers::makeCardButton(I18n::t(QStringLiteral("delete")));
         buttons->addWidget(open);
         buttons->addWidget(vis);
         buttons->addStretch();

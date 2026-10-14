@@ -1,5 +1,6 @@
 #include "HubWindow.h"
 
+#include "I18n.h"
 #include "NotesTab.h"
 #include "SettingsTab.h"
 #include "TrashTab.h"
@@ -18,9 +19,9 @@ HubWindow::HubWindow(QWidget *parent)
     m_settings = new SettingsTab;
 
     m_tabs = new QTabWidget(this);
-    m_tabs->addTab(m_notes, QStringLiteral("Note"));
-    m_tabs->addTab(m_trash, QStringLiteral("Cestino"));
-    m_tabs->addTab(m_settings, QStringLiteral("Impostazioni"));
+    m_tabs->addTab(m_notes, I18n::t(QStringLiteral("app.tab_notes")));
+    m_tabs->addTab(m_trash, I18n::t(QStringLiteral("app.tab_trash")));
+    m_tabs->addTab(m_settings, I18n::t(QStringLiteral("app.tab_settings")));
     setCentralWidget(m_tabs);
 
     // The hub exposes the same public interface as before (signals + refresh):

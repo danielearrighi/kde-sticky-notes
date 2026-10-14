@@ -1,5 +1,6 @@
 #include "SettingsTab.h"
 
+#include "I18n.h"
 #include "Storage.h"
 #include "Themes.h"
 #include "UiHelpers.h"
@@ -7,7 +8,9 @@
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QFont>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -15,6 +18,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -33,13 +37,36 @@ void SettingsTab::buildUi()
     root->setSpacing(12);
 
     // --- general preferences ---
-    auto *general = new QGroupBox(QStringLiteral("Preferenze"));
+    auto *general = new QGroupBox(I18n::t(QStringLiteral("settings.title")));
     auto *form = new QFormLayout(general);
+
+    // Language row: combo + "Restart now" (changes apply at the next start), with
+    // a small hint below.
+    m_language = new QComboBox;
+    m_restart = new QPushButton(I18n::t(QStringLiteral("settings.restart_now")));
+    m_languageHint = new QLabel(I18n::t(QStringLiteral("settings.applies_next_start")));
+    m_languageHint->setEnabled(false);
+    {
+        QFont hintFont = m_languageHint->font();
+        hintFont.setItalic(true);
+        m_languageHint->setFont(hintFont);
+    }
+    auto *langRow = new QHBoxLayout;
+    langRow->setContentsMargins(0, 0, 0, 0);
+    langRow->addWidget(m_language);
+    langRow->addWidget(m_restart);
+    langRow->addStretch();
+    auto *langCol = new QVBoxLayout;
+    langCol->setContentsMargins(0, 0, 0, 0);
+    langCol->setSpacing(2);
+    langCol->addLayout(langRow);
+    langCol->addWidget(m_languageHint);
+    form->addRow(I18n::t(QStringLiteral("settings.language")), langCol);
 
     m_defaultTheme = new QComboBox;
     m_defaultLayer = new QComboBox;
-    m_defaultLayer->addItem(QStringLiteral("Sopra le finestre (sempre visibile)"), QStringLiteral("top"));
-    m_defaultLayer->addItem(QStringLiteral("Sul desktop (dietro le finestre)"), QStringLiteral("bottom"));
+    m_defaultLayer->addItem(I18n::t(QStringLiteral("settings.layer_top")), QStringLiteral("top"));
+    m_defaultLayer->addItem(I18n::t(QStringLiteral("settings.layer_bottom")), QStringLiteral("bottom"));
 
     m_defaultWidth = new QSpinBox;
     m_defaultWidth->setRange(120, 2000);
@@ -57,11 +84,11 @@ void SettingsTab::buildUi()
     m_fontSize = new QSpinBox;
     m_fontSize->setRange(7, 28);
 
-    m_autostart = new QCheckBox(QStringLiteral("Avvia all'accesso"));
-    m_confirmDelete = new QCheckBox(QStringLiteral("Chiedi conferma prima di eliminare una nota"));
+    m_autostart = new QCheckBox(I18n::t(QStringLiteral("settings.autostart")));
+    m_confirmDelete = new QCheckBox(I18n::t(QStringLiteral("settings.confirm_delete")));
 
-    form->addRow(QStringLiteral("Tema predefinito per nuove note:"), m_defaultTheme);
-    form->addRow(QStringLiteral("Posizione predefinita:"), m_defaultLayer);
+    form->addRow(I18n::t(QStringLiteral("settings.default_theme")), m_defaultTheme);
+    form->addRow(I18n::t(QStringLiteral("settings.default_position")), m_defaultLayer);
 
     auto *sizeRow = new QHBoxLayout;
     sizeRow->setContentsMargins(0, 0, 0, 0);
@@ -69,28 +96,33 @@ void SettingsTab::buildUi()
     sizeRow->addWidget(new QLabel(QStringLiteral("X")));
     sizeRow->addWidget(m_defaultHeight);
     sizeRow->addStretch();
-    form->addRow(QStringLiteral("Dimensione nuova nota (WxH):"), sizeRow);
+    form->addRow(I18n::t(QStringLiteral("settings.new_note_size")), sizeRow);
 
-    form->addRow(QStringLiteral("Carattere note:"), m_fontFamily);
-    form->addRow(QStringLiteral("Dimensione carattere:"), m_fontSize);
+    form->addRow(I18n::t(QStringLiteral("settings.note_font")), m_fontFamily);
+    form->addRow(I18n::t(QStringLiteral("settings.font_size")), m_fontSize);
 
     // Date/time format used for new note titles and for the trash dates:
     // exposed as a setting to ease a future i18n.
     m_dateFormat = new QLineEdit;
     m_dateFormat->setPlaceholderText(UiHelpers::defaultDateFormat());
-    m_dateFormat->setToolTip(QStringLiteral(
-        "Sintassi Qt (es. dd/MM/yyyy HH:mm). Vuoto = formato predefinito."));
-    form->addRow(QStringLiteral("Formato data e ora:"), m_dateFormat);
+    m_dateFormat->setToolTip(I18n::t(QStringLiteral("settings.date_format_tooltip")));
+    form->addRow(I18n::t(QStringLiteral("settings.date_format")), m_dateFormat);
 
     form->addRow(QString(), m_autostart);
     form->addRow(QString(), m_confirmDelete);
 
-    auto *path = new QLabel(QStringLiteral("<i>Dati: %1</i>").arg(Storage::instance().databasePath()));
+    auto *path = new QLabel(I18n::t(QStringLiteral("settings.data_path"))
+                                .arg(Storage::instance().databasePath()));
+    {
+        QFont pathFont = path->font();
+        pathFont.setItalic(true);
+        path->setFont(pathFont);
+    }
     path->setTextInteractionFlags(Qt::TextSelectableByMouse);
     form->addRow(QString(), path);
 
     // --- theme editor ---
-    auto *themesBox = new QGroupBox(QStringLiteral("Temi (colori delle note)"));
+    auto *themesBox = new QGroupBox(I18n::t(QStringLiteral("settings.themes_title")));
     auto *tl = new QHBoxLayout(themesBox);
 
     m_themeList = new QListWidget;
@@ -106,14 +138,14 @@ void SettingsTab::buildUi()
         b->setFixedHeight(26);
         b->setCursor(Qt::PointingHandCursor);
     }
-    editor->addRow(QStringLiteral("Nome:"), m_themeName);
-    editor->addRow(QStringLiteral("Corpo nota:"), m_themeBody);
-    editor->addRow(QStringLiteral("Barra titolo:"), m_themeTitle);
-    editor->addRow(QStringLiteral("Testo:"), m_themeText);
+    editor->addRow(I18n::t(QStringLiteral("settings.theme_name")), m_themeName);
+    editor->addRow(I18n::t(QStringLiteral("settings.theme_body")), m_themeBody);
+    editor->addRow(I18n::t(QStringLiteral("settings.theme_title_bar")), m_themeTitle);
+    editor->addRow(I18n::t(QStringLiteral("settings.theme_text")), m_themeText);
 
-    m_themeNew = UiHelpers::makeCardButton(QStringLiteral("Nuovo tema"));
-    m_themeDelete = UiHelpers::makeCardButton(QStringLiteral("Elimina"));
-    m_themeSave = UiHelpers::makeCardButton(QStringLiteral("Salva tema"));
+    m_themeNew = UiHelpers::makeCardButton(I18n::t(QStringLiteral("settings.theme_new")));
+    m_themeDelete = UiHelpers::makeCardButton(I18n::t(QStringLiteral("delete")));
+    m_themeSave = UiHelpers::makeCardButton(I18n::t(QStringLiteral("settings.theme_save")));
     auto *buttons = new QHBoxLayout;
     buttons->addWidget(m_themeNew);
     buttons->addWidget(m_themeDelete);
@@ -128,6 +160,7 @@ void SettingsTab::buildUi()
 
     // --- connections ---
     auto persist = [this] {
+        Storage::instance().setSetting(QStringLiteral("language"), m_language->currentData().toString());
         Storage::instance().setSetting(QStringLiteral("default_theme"), m_defaultTheme->currentData().toString());
         Storage::instance().setSetting(QStringLiteral("default_layer"), m_defaultLayer->currentData().toString());
         Storage::instance().setSetting(QStringLiteral("default_width"), QString::number(m_defaultWidth->value()));
@@ -142,6 +175,7 @@ void SettingsTab::buildUi()
     // currentIndexChanged does not fire when the user re-selects the already
     // active item (e.g. the first theme, shown as preselected): in that case the
     // value would not be saved. activated also covers re-selection.
+    connect(m_language, &QComboBox::activated, this, persist);
     connect(m_defaultTheme, &QComboBox::activated, this, persist);
     connect(m_defaultLayer, &QComboBox::activated, this, persist);
     connect(m_defaultWidth, &QSpinBox::valueChanged, this, persist);
@@ -156,6 +190,15 @@ void SettingsTab::buildUi()
     connect(m_autostart, &QCheckBox::toggled, this, persist);
     connect(m_confirmDelete, &QCheckBox::toggled, this, persist);
 
+    // Language change needs a restart: save and relaunch with "--restart" so the
+    // new process skips the single-instance probe.
+    connect(m_restart, &QPushButton::clicked, this, [this, persist] {
+        persist();
+        QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                {QStringLiteral("--restart")});
+        QCoreApplication::quit();
+    });
+
     connect(m_themeList, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *it) {
         if (it)
             loadThemeIntoEditor(it->data(Qt::UserRole).toString());
@@ -167,7 +210,7 @@ void SettingsTab::buildUi()
     connect(m_themeNew, &QPushButton::clicked, this, [this] {
         Theme t;
         t.id = QStringLiteral("tema-") + QString::number(QDateTime::currentMSecsSinceEpoch());
-        t.name = QStringLiteral("Nuovo tema");
+        t.name = I18n::t(QStringLiteral("settings.theme_new"));
         t.body = QStringLiteral("#FCFC97");
         t.titleBar = Themes::darken(t.body, 0.92);
         t.text = QStringLiteral("#45353B");
@@ -186,8 +229,8 @@ void SettingsTab::buildUi()
         const QString id = it->data(Qt::UserRole).toString();
         const Theme t = Storage::instance().theme(id);
         if (t.builtin) {
-            QMessageBox::information(this, QStringLiteral("Tema"),
-                                     QStringLiteral("I temi predefiniti non si possono eliminare."));
+            QMessageBox::information(this, I18n::t(QStringLiteral("settings.theme_dialog_title")),
+                                     I18n::t(QStringLiteral("settings.theme_builtin_locked")));
             return;
         }
         Storage::instance().deleteTheme(id);
@@ -215,7 +258,7 @@ void SettingsTab::pickColorFor(QPushButton *button)
 {
     const QColor cur(button->property("hex").toString());
     const QColor c = QColorDialog::getColor(cur.isValid() ? cur : Qt::yellow, this,
-                                            QStringLiteral("Scegli colore"));
+                                            I18n::t(QStringLiteral("settings.choose_color")));
     if (c.isValid())
         applyColorToButton(button, c.name());
 }
@@ -226,7 +269,8 @@ void SettingsTab::loadThemeIntoEditor(const QString &themeId)
     if (!t.isValid())
         return;
     m_editingThemeId = t.id;
-    m_themeName->setText(t.name);
+    m_themeName->setText(Themes::displayName(t));
+    m_themeName->setEnabled(!t.builtin);
     applyColorToButton(m_themeBody, t.body);
     applyColorToButton(m_themeTitle, t.titleBar);
     applyColorToButton(m_themeText, t.text);
@@ -240,7 +284,10 @@ void SettingsTab::saveCurrentTheme()
     Theme t = Storage::instance().theme(m_editingThemeId);
     if (!t.isValid())
         return;
-    t.name = m_themeName->text().trimmed().isEmpty() ? t.name : m_themeName->text().trimmed();
+    // Builtin names are derived from the id: keep them stable, only custom
+    // themes take the name from the field.
+    if (!t.builtin)
+        t.name = m_themeName->text().trimmed().isEmpty() ? t.name : m_themeName->text().trimmed();
     t.body = m_themeBody->property("hex").toString();
     t.titleBar = m_themeTitle->property("hex").toString();
     t.text = m_themeText->property("hex").toString();
@@ -255,6 +302,7 @@ void SettingsTab::loadIntoUi()
     // transient values would be written back to the settings (clobbering).
     QSignalBlocker bTheme(m_defaultTheme);
     QSignalBlocker bLayer(m_defaultLayer);
+    QSignalBlocker bLanguage(m_language);
     QSignalBlocker bWidth(m_defaultWidth);
     QSignalBlocker bHeight(m_defaultHeight);
     QSignalBlocker bFont(m_fontFamily);
@@ -264,11 +312,25 @@ void SettingsTab::loadIntoUi()
     QSignalBlocker bConfirm(m_confirmDelete);
     QSignalBlocker bList(m_themeList);
 
+    // language selector: "System" (resolved at startup) + the discovered ones
+    m_language->clear();
+    m_language->addItem(I18n::t(QStringLiteral("settings.system")), QStringLiteral("system"));
+    for (const LanguageInfo &lang : I18n::availableLanguages())
+        m_language->addItem(lang.name, lang.code);
+    {
+        const QString savedLang = Storage::instance().setting(QStringLiteral("language"), QStringLiteral("en"));
+        int li = m_language->findData(savedLang);
+        if (li < 0)
+            li = m_language->findData(QStringLiteral("en"));
+        m_language->setCurrentIndex(li >= 0 ? li : 0);
+    }
+
     // themes in the combos
     m_defaultTheme->clear();
     for (const Theme &t : Storage::instance().themes())
-        m_defaultTheme->addItem(UiHelpers::swatchIcon(t.body), t.name, t.id);
-    m_defaultTheme->addItem(UiHelpers::randomSwatchIcon(), QStringLiteral("Casuale (colore a caso)"),
+        m_defaultTheme->addItem(UiHelpers::swatchIcon(t.body), Themes::displayName(t), t.id);
+    m_defaultTheme->addItem(UiHelpers::randomSwatchIcon(),
+                            I18n::t(QStringLiteral("settings.random_color")),
                             Themes::kRandomId);
     const QString defTheme = Storage::instance().setting(QStringLiteral("default_theme"), Themes::kRandomId);
     const int ti = m_defaultTheme->findData(defTheme);
@@ -293,7 +355,7 @@ void SettingsTab::loadIntoUi()
     const QString keep = m_editingThemeId;
     m_themeList->clear();
     for (const Theme &t : Storage::instance().themes()) {
-        auto *it = new QListWidgetItem(UiHelpers::swatchIcon(t.body), t.name, m_themeList);
+        auto *it = new QListWidgetItem(UiHelpers::swatchIcon(t.body), Themes::displayName(t), m_themeList);
         it->setData(Qt::UserRole, t.id);
     }
     if (!keep.isEmpty())

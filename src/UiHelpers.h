@@ -9,6 +9,9 @@ class QPushButton;
 namespace UiHelpers
 {
 
+/// Shared label shown for a note without a title.
+QString untitled();
+
 /// Converts Markdown into a single plain-text line for previews.
 QString plainSnippet(const QString &markdown, int maxLen = 90);
 

@@ -1,5 +1,6 @@
 #include "UiHelpers.h"
 
+#include "I18n.h"
 #include "Storage.h"
 
 #include <QColor>
@@ -11,6 +12,11 @@
 
 namespace UiHelpers
 {
+
+QString untitled()
+{
+    return I18n::t(QStringLiteral("untitled"));
+}
 
 QString plainSnippet(const QString &markdown, int maxLen)
 {

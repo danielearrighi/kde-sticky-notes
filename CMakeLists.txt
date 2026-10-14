@@ -18,6 +18,7 @@ qt_add_executable(sticky-notes
     src/Models.h
     src/Storage.h         src/Storage.cpp
     src/Themes.h          src/Themes.cpp
+    src/I18n.h            src/I18n.cpp
     src/NoteWindow.h      src/NoteWindow.cpp
     src/UiHelpers.h       src/UiHelpers.cpp
     src/NotesTab.h        src/NotesTab.cpp
@@ -27,10 +28,16 @@ qt_add_executable(sticky-notes
     src/AppController.h   src/AppController.cpp
 )
 
+# Translations are one JSON file per language, embedded as Qt resources. The
+# files may not exist yet: an empty glob is fine and CONFIGURE_DEPENDS makes a
+# later build pick them up.
+file(GLOB I18N_JSON CONFIGURE_DEPENDS "resources/i18n/*.json")
+
 qt_add_resources(sticky-notes "app_resources"
     PREFIX "/"
     BASE resources
     FILES resources/icons/sticky-notes.png
+          ${I18N_JSON}
 )
 
 target_link_libraries(sticky-notes PRIVATE

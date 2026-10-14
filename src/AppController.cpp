@@ -1,8 +1,10 @@
 #include "AppController.h"
+#include "I18n.h"
 #include "NoteWindow.h"
 #include "HubWindow.h"
 #include "Storage.h"
 #include "Themes.h"
+#include "UiHelpers.h"
 
 #include <QApplication>
 #include <QLocalServer>
@@ -157,11 +159,11 @@ void AppController::createNewNote()
 {
     Note n;
 
-    // Default title: "Nota <date/time>", with the format configurable in the
-    // settings ("date_format" key) for a future i18n.
+    // Default title: "Note <date/time>", with the format configurable in the
+    // settings ("date_format" key).
     const QString dateFormat = Storage::instance().setting(QStringLiteral("date_format"),
                                                            QStringLiteral("dd/MM/yyyy HH:mm"));
-    n.title = QStringLiteral("Nota ")
+    n.title = I18n::t(QStringLiteral("note.default_title")) + QStringLiteral(" ")
               + QDateTime::currentDateTime().toString(dateFormat.isEmpty()
                                                           ? QStringLiteral("dd/MM/yyyy HH:mm")
                                                           : dateFormat);
@@ -232,9 +234,9 @@ void AppController::onDeleteNote(qint64 id)
 {
     if (Storage::instance().setting(QStringLiteral("confirm_delete"), QStringLiteral("1")) != QLatin1String("0")) {
         const Note n = Storage::instance().note(id);
-        const QString name = n.title.trimmed().isEmpty() ? QStringLiteral("(senza titolo)") : n.title;
-        if (QMessageBox::question(m_hub, QStringLiteral("Elimina nota"),
-                                  QStringLiteral("Spostare \u201c%1\u201d nel cestino?").arg(name))
+        const QString name = n.title.trimmed().isEmpty() ? UiHelpers::untitled() : n.title;
+        if (QMessageBox::question(m_hub, I18n::t(QStringLiteral("note.delete")),
+                                  I18n::t(QStringLiteral("note.confirm_delete")).arg(name))
             != QMessageBox::Yes)
             return;
     }
@@ -295,7 +297,7 @@ void AppController::applyAutostart()
     out << "[Desktop Entry]\n"
         << "Type=Application\n"
         << "Name=Sticky Notes\n"
-        << "Comment=Note adesive sul desktop\n"
+        << "Comment=" << I18n::t(QStringLiteral("app.autostart_comment")) << "\n"
         << "Exec=" << QCoreApplication::applicationFilePath() << "\n"
         << "Icon=sticky-notes\n"
         << "Terminal=false\n"

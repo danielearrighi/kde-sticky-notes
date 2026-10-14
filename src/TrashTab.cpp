@@ -1,8 +1,10 @@
 #include "TrashTab.h"
 
+#include "I18n.h"
 #include "Storage.h"
 #include "UiHelpers.h"
 
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -19,11 +21,17 @@ TrashTab::TrashTab(QWidget *parent)
     root->setSpacing(10);
 
     auto *head = new QHBoxLayout;
-    head->addWidget(new QLabel(QStringLiteral("<b>Cestino</b>")));
+    auto *heading = new QLabel(I18n::t(QStringLiteral("trash.heading")));
+    {
+        QFont headingFont = heading->font();
+        headingFont.setBold(true);
+        heading->setFont(headingFont);
+    }
+    head->addWidget(heading);
     head->addStretch();
-    m_restore = UiHelpers::makeCardButton(QStringLiteral("Ripristina"));
-    m_purge = UiHelpers::makeCardButton(QStringLiteral("Elimina definitivamente"));
-    m_purgeAll = UiHelpers::makeCardButton(QStringLiteral("Svuota cestino"));
+    m_restore = UiHelpers::makeCardButton(I18n::t(QStringLiteral("restore")));
+    m_purge = UiHelpers::makeCardButton(I18n::t(QStringLiteral("trash.delete_permanently")));
+    m_purgeAll = UiHelpers::makeCardButton(I18n::t(QStringLiteral("trash.empty")));
     head->addWidget(m_restore);
     head->addWidget(m_purge);
     head->addWidget(m_purgeAll);
@@ -31,10 +39,10 @@ TrashTab::TrashTab(QWidget *parent)
 
     m_table = new QTableWidget;
     m_table->setColumnCount(4);
-    m_table->setHorizontalHeaderLabels({QStringLiteral("Titolo"),
-                                        QStringLiteral("Contenuto"),
-                                        QStringLiteral("Creazione"),
-                                        QStringLiteral("Eliminazione")});
+    m_table->setHorizontalHeaderLabels({I18n::t(QStringLiteral("trash.col_title")),
+                                        I18n::t(QStringLiteral("trash.col_content")),
+                                        I18n::t(QStringLiteral("trash.col_created")),
+                                        I18n::t(QStringLiteral("trash.col_deleted"))});
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -51,7 +59,7 @@ TrashTab::TrashTab(QWidget *parent)
     header->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_table->setColumnWidth(0, 200);
 
-    m_empty = new QLabel(QStringLiteral("Il cestino \u00e8 vuoto."));
+    m_empty = new QLabel(I18n::t(QStringLiteral("trash.empty_message")));
     m_empty->setAlignment(Qt::AlignCenter);
     m_empty->setEnabled(false);
 
@@ -71,8 +79,8 @@ TrashTab::TrashTab(QWidget *parent)
     connect(m_purgeAll, &QPushButton::clicked, this, [this] {
         if (Storage::instance().deletedCount() == 0)
             return;
-        if (QMessageBox::question(this, QStringLiteral("Svuota cestino"),
-                                  QStringLiteral("Eliminare definitivamente tutte le note nel cestino?"))
+        if (QMessageBox::question(this, I18n::t(QStringLiteral("trash.empty")),
+                                  I18n::t(QStringLiteral("trash.confirm_empty")))
             == QMessageBox::Yes)
             emit purgeAllRequested();
     });
@@ -98,7 +106,7 @@ void TrashTab::refresh()
     for (int row = 0; row < deleted.size(); ++row) {
         const Note &n = deleted.at(row);
 
-        const QString title = n.title.trimmed().isEmpty() ? QStringLiteral("(senza titolo)")
+        const QString title = n.title.trimmed().isEmpty() ? UiHelpers::untitled()
                                                           : n.title;
         auto *titleItem = new QTableWidgetItem(title);
         titleItem->setData(Qt::UserRole, n.id);

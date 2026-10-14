@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **Internationalization**: the UI uses **symbolic keys**
+  (`I18n::t("settings.title")`) with **English** as the source/fallback
+  (`en.json`) and **Italian** included as a translation (`resources/i18n/*.json`,
+  embedded as Qt resources and loaded at runtime). `en.json` is always installed
+  as the base translator and the selected language on top of it, so a missing key
+  falls back to English. Translation values contain no HTML (bold/italic are
+  applied in C++). The settings have a **language selector** (*System* + the
+  available languages) and a **Restart now** button: the choice is applied at the
+  next start. Built-in theme names are translated at display time.
 - **Focused note in the foreground**: the note that has keyboard focus stays in
   front of normal windows even when it is set *on the desktop* (*bottom* layer).
   When focus moves elsewhere it returns to the configured layer, after a short

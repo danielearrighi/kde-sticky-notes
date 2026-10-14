@@ -36,8 +36,10 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   drag/resize). `HubWindow` = thin `QMainWindow` shell over three tab widgets —
   `NotesTab` (grid), `TrashTab`, `SettingsTab` — which own their own widgets and
   emit signals; `HubWindow` re-emits them so `AppController` is unchanged.
-  Shared UI helpers (`plainSnippet`, `makeCardButton`, `swatchIcon`, date
-  formatting) live in `UiHelpers`. `Themes` = builtin palette.
+  Shared UI helpers (`plainSnippet`, `makeCardButton`, `swatchIcon`, `untitled`,
+  date formatting) live in `UiHelpers`. `Themes` = builtin palette; `I18n` =
+  runtime translations (symbolic keys, `resources/i18n/*.json`), selected by the
+  `language` setting and applied at the next start.
 - Closing the hub quits the app (same as *Esci dall'app*): `HubWindow::closeEvent()`
   emits `quitRequested` so the X button does not strand the app with note windows
   and no tray. `setQuitOnLastWindowClosed(false)` is kept so hiding a note window
@@ -48,8 +50,17 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
 ## Conventions & traps
 
 - **Prose is English**: code comments, docstrings, `README.md`, `CHANGELOG.md` and
-  this file. Only user-facing UI strings and files under `docs/` stay Italian
-  (i18n is the next step); keep those Italian when editing.
+  this file. **UI strings use `I18n::t("symbolic.key")`** with lowercase,
+  dot-grouped keys (groups: generic like `open`/`hide`/`delete`/`restore`/`new_note`/
+  `untitled`, then `app.*`, `notes.*`, `trash.*`, `note.*`, `format.*`,
+  `settings.*`, `colors.*`). Values contain **no HTML**: bold/italic are applied in
+  C++ with `QFont`. Translations live in `resources/i18n/*.json` (one flat
+  symbolic-key → value map per language, English source/fallback in `en.json`,
+  Italian in `it.json`), embedded as Qt resources and loaded at runtime by `I18n`.
+  `en.json` is **always installed as the base translator**; the selected language
+  is installed on top, so a missing key falls back to English. Files under `docs/`
+  stay Italian. To add a language: drop `resources/i18n/<code>.json` with a `_meta`
+  `{code, name}` plus the translated values and rebuild.
 - `Storage::bindText()` normalizes a **null** `QString` to `""`. Binding a default
   `QString` directly stores SQL `NULL` and violates `NOT NULL` on `notes.title`.
   Use/keep this helper for text columns.
@@ -59,8 +70,7 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   explode. Drag math must use the **local** coordinate incrementally with a fixed
   press reference (see `NoteWindow::mouseMoveEvent()`), never `globalPosition()`
   as an absolute base.
-- `docs/wayland-layer-shell.md` (Italian) documents the Wayland/layer-shell
-  rationale and diagnostics — read it before changing window/layer behavior.
+- Do not reference /docs files since they are not committed to the repository.
 
 ## Notes for agents (context budget)
 
