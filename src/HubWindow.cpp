@@ -1,0 +1,60 @@
+#include "HubWindow.h"
+
+#include "NotesTab.h"
+#include "SettingsTab.h"
+#include "TrashTab.h"
+
+#include <QCloseEvent>
+#include <QTabWidget>
+
+HubWindow::HubWindow(QWidget *parent)
+    : QMainWindow(parent)
+{
+    setWindowTitle(QStringLiteral("Sticky Notes"));
+    resize(880, 620);
+
+    m_notes = new NotesTab;
+    m_trash = new TrashTab;
+    m_settings = new SettingsTab;
+
+    m_tabs = new QTabWidget(this);
+    m_tabs->addTab(m_notes, QStringLiteral("Note"));
+    m_tabs->addTab(m_trash, QStringLiteral("Cestino"));
+    m_tabs->addTab(m_settings, QStringLiteral("Impostazioni"));
+    setCentralWidget(m_tabs);
+
+    // The hub exposes the same public interface as before (signals + refresh):
+    // it forwards the tabs' ones, which stay independent from each other.
+    connect(m_notes, &NotesTab::newNoteRequested, this, &HubWindow::newNoteRequested);
+    connect(m_notes, &NotesTab::openNoteRequested, this, &HubWindow::openNoteRequested);
+    connect(m_notes, &NotesTab::noteVisibilityToggled, this, &HubWindow::noteVisibilityToggled);
+    connect(m_notes, &NotesTab::deleteNoteRequested, this, &HubWindow::deleteNoteRequested);
+    connect(m_notes, &NotesTab::quitRequested, this, &HubWindow::quitRequested);
+
+    connect(m_trash, &TrashTab::restoreNoteRequested, this, &HubWindow::restoreNoteRequested);
+    connect(m_trash, &TrashTab::purgeNoteRequested, this, &HubWindow::purgeNoteRequested);
+    connect(m_trash, &TrashTab::purgeAllRequested, this, &HubWindow::purgeAllRequested);
+
+    connect(m_settings, &SettingsTab::settingsChanged, this, &HubWindow::settingsChanged);
+    // The trash dates use the date/time format: refresh them right away.
+    connect(m_settings, &SettingsTab::dateFormatChanged, m_trash, &TrashTab::refresh);
+
+    refresh();
+}
+
+void HubWindow::closeEvent(QCloseEvent *event)
+{
+    // The hub is the only "normal" window and there is no tray icon: if we hid
+    // it, a hidden window would also disappear from the taskbar and there would
+    // be no way left to reopen it or quit the app. Closing with the X therefore
+    // is equivalent to "Quit app".
+    event->accept();
+    emit quitRequested();
+}
+
+void HubWindow::refresh()
+{
+    m_notes->refresh();
+    m_trash->refresh();
+    m_settings->refresh();
+}

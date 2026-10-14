@@ -1,0 +1,6 @@
+build/
+*.user
+*.o
+*.so
+docs/
+.vscode/

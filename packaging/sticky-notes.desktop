@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Sticky Notes
+Name[it]=Sticky Notes
+GenericName=Desktop sticky notes
+Comment=Desktop sticky notes for KDE Plasma (Wayland)
+Comment[it]=Post-it sul desktop per KDE Plasma (Wayland)
+Exec=sticky-notes
+Icon=sticky-notes
+Terminal=false
+Categories=Utility;
+Keywords=note;sticky;postit;memo;
+StartupNotify=false

@@ -1,0 +1,46 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(sticky-notes VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+
+# Generate build/compile_commands.json: used by editors (VS Code/CLion/clangd)
+# to resolve Qt #includes in IntelliSense.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Sql Network)
+find_package(LayerShellQt REQUIRED)
+
+qt_add_executable(sticky-notes
+    src/main.cpp
+    src/Models.h
+    src/Storage.h         src/Storage.cpp
+    src/Themes.h          src/Themes.cpp
+    src/NoteWindow.h      src/NoteWindow.cpp
+    src/UiHelpers.h       src/UiHelpers.cpp
+    src/NotesTab.h        src/NotesTab.cpp
+    src/TrashTab.h        src/TrashTab.cpp
+    src/SettingsTab.h     src/SettingsTab.cpp
+    src/HubWindow.h       src/HubWindow.cpp
+    src/AppController.h   src/AppController.cpp
+)
+
+qt_add_resources(sticky-notes "app_resources"
+    PREFIX "/"
+    BASE resources
+    FILES resources/icons/sticky-notes.png
+)
+
+target_link_libraries(sticky-notes PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Sql
+    Qt6::Network
+    LayerShellQt::Interface
+)
+
+install(TARGETS sticky-notes RUNTIME DESTINATION bin)
+install(FILES packaging/sticky-notes.desktop DESTINATION share/applications)
