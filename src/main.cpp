@@ -28,13 +28,20 @@ int main(int argc, char **argv)
     // Single instance: if an instance is already running, ask it to show the hub and exit.
     // A "--restart" launch skips the probe: it must always start, otherwise it
     // would forward "show" to the previous (dying) instance instead.
-    if (!QCoreApplication::arguments().contains(QStringLiteral("--restart"))) {
+    // An "--autostart" launch (at login) only probes: the hub must not pop up,
+    // and the running instance already has its notes on screen.
+    const QStringList arguments = QCoreApplication::arguments();
+    const bool restart = arguments.contains(QStringLiteral("--restart"));
+    const bool autostart = arguments.contains(QStringLiteral("--autostart"));
+    if (!restart) {
         QLocalSocket probe;
         probe.connectToServer(QString::fromLatin1(kServerName));
         if (probe.waitForConnected(300)) {
-            probe.write("show");
-            probe.flush();
-            probe.waitForBytesWritten(300);
+            if (!autostart) {
+                probe.write("show");
+                probe.flush();
+                probe.waitForBytesWritten(300);
+            }
             return 0;
         }
     }
@@ -53,6 +60,6 @@ int main(int argc, char **argv)
     if (!controller.listenForSecondInstance(&serverError))
         qWarning() << "[app] impossibile avviare l'istanza singola:" << serverError;
 
-    controller.start();
+    controller.start(autostart);
     return app.exec();
 }

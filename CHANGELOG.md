@@ -26,6 +26,11 @@
   note: while it is open the note stays in front).
 
 ### Changed
+- **Autostart at login**: the generated `~/.config/autostart/sticky-notes.desktop`
+  now launches the app with `--autostart`, so at login only the notes appear on
+  the desktop and the hub stays out of the way — in the system tray when *Close
+  to system tray* is enabled, otherwise minimized to the taskbar (a normal
+  launch, or relaunching the app, still opens the hub as before).
 - **Themes**: removed the concept of **border**. The border is no longer
   configurable in the theme editor nor saved to the database: notes no longer
   have the 1 px outline (which made the body appear ~2 px narrower than the

@@ -39,7 +39,9 @@ the note grid, trash and settings.
   settings.
 - **Single instance**: a second launch does not open a copy but brings the hub to
   the front.
-- Optional **autostart** (`~/.config/autostart/sticky-notes.desktop`).
+- Optional **autostart** (`~/.config/autostart/sticky-notes.desktop`): at login only
+  the notes appear on the desktop, the hub stays out of the way (in the tray when
+  *close to system tray* is active, otherwise minimized).
 - Closing the hub (X) quits the app, like **Quit app**: the notes are saved and
   reappear at the next launch.
 - Optional **close to system tray**: when enabled, closing the hub (X or *Quit

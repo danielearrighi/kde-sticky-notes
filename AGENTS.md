@@ -48,6 +48,10 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   the app.
 - Single instance via a `QLocalServer` named `sticky-notes-single-instance`: a
   second launch tells the running instance to show the hub, then exits 0.
+  `main.cpp` recognizes `--restart` (skip the probe, used after a language change)
+  and `--autostart` (written into the generated autostart `.desktop`): an
+  autostart launch only probes and calls `AppController::start(true)`, which shows
+  the notes but keeps the hub hidden (tray) or minimized.
 
 ## Conventions & traps
 

@@ -22,8 +22,10 @@ public:
     /// Opens the database. Returns false and sets errorOut on error.
     bool init(QString *errorOut);
 
-    /// Creates the hub + visible notes and shows everything.
-    void start();
+    /// Creates the hub + visible notes. With startHidden (an autostart launch)
+    /// only the notes are shown and the hub stays out of the way (in the tray
+    /// when "close to system tray" is active, otherwise minimized).
+    void start(bool startHidden = false);
 
     /// Starts the single-instance server (a second launch brings the hub to the front).
     bool listenForSecondInstance(QString *errorOut);

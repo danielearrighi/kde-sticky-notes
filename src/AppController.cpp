@@ -79,14 +79,17 @@ bool AppController::listenForSecondInstance(QString *errorOut)
     connect(m_server, &QLocalServer::newConnection, this, [this] {
         while (QLocalSocket *s = m_server->nextPendingConnection()) {
             connect(s, &QLocalSocket::disconnected, s, &QLocalSocket::deleteLater);
-            s->readAll();
-            showHub();
+            // A normal second launch asks for the hub ("show"); an autostart
+            // launch only probes the running instance and sends nothing.
+            s->waitForReadyRead(500);
+            if (s->readAll() == QByteArrayLiteral("show"))
+                showHub();
         }
     });
     return true;
 }
 
-void AppController::start()
+void AppController::start(bool startHidden)
 {
     m_hub = new HubWindow;
     connect(m_hub, &HubWindow::newNoteRequested, this, &AppController::onNewNote);
@@ -106,9 +109,19 @@ void AppController::start()
         if (n.visible)
             ensureWindow(n);
 
-    m_hub->show();
-    m_hub->raise();
-    m_hub->activateWindow();
+    if (startHidden) {
+        // Autostart at login: only the notes appear on the desktop, the hub
+        // stays out of the way. With "close to system tray" it goes to the tray,
+        // otherwise it is minimized to the taskbar so it can be reopened.
+        if (closeToTrayEnabled())
+            m_hub->hide();
+        else
+            m_hub->showMinimized();
+    } else {
+        m_hub->show();
+        m_hub->raise();
+        m_hub->activateWindow();
+    }
 
     applyAutostart();
 }
@@ -392,7 +405,7 @@ void AppController::applyAutostart()
         << "Type=Application\n"
         << "Name=Sticky Notes\n"
         << "Comment=" << I18n::t(QStringLiteral("app.autostart_comment")) << "\n"
-        << "Exec=" << QCoreApplication::applicationFilePath() << "\n"
+        << "Exec=\"" << QCoreApplication::applicationFilePath() << "\" --autostart\n"
         << "Icon=sticky-notes\n"
         << "Terminal=false\n"
         << "X-GNOME-Autostart-enabled=true\n"
