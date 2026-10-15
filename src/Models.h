@@ -15,6 +15,7 @@ struct Note
     QString layer = QStringLiteral("top");   // "top" | "bottom"
     bool visible = true;
     bool collapsed = false;   // collapsed to the title bar only
+    int scroll = 0;           // saved body scroll position (vertical pixels)
     bool deleted = false;
     QString createdAt;
     QString updatedAt;

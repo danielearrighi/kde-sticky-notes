@@ -37,6 +37,8 @@ HubWindow::HubWindow(QWidget *parent)
     connect(m_trash, &TrashTab::purgeAllRequested, this, &HubWindow::purgeAllRequested);
 
     connect(m_settings, &SettingsTab::settingsChanged, this, &HubWindow::settingsChanged);
+    // The "Quit app" button turns into "Close to tray" while that option is on.
+    connect(m_settings, &SettingsTab::settingsChanged, m_notes, &NotesTab::updateQuitButton);
     // The trash dates use the date/time format: refresh them right away.
     connect(m_settings, &SettingsTab::dateFormatChanged, m_trash, &TrashTab::refresh);
 

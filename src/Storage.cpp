@@ -83,6 +83,7 @@ void Storage::ensureSchema()
         " layer TEXT NOT NULL DEFAULT 'top',"
         " visible INTEGER NOT NULL DEFAULT 1,"
         " collapsed INTEGER NOT NULL DEFAULT 0,"
+        " scroll INTEGER NOT NULL DEFAULT 0,"
         " deleted INTEGER NOT NULL DEFAULT 0,"
         " created_at TEXT, updated_at TEXT, deleted_at TEXT)"));
 
@@ -110,6 +111,8 @@ void Storage::ensureSchema()
             cols << info.value(1).toString();
     if (!cols.contains(QStringLiteral("collapsed")))
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0"));
+    if (!cols.contains(QStringLiteral("scroll")))
+        q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN scroll INTEGER NOT NULL DEFAULT 0"));
 }
 
 // ---------------------------------------------------------------- note
@@ -129,15 +132,16 @@ Note noteFromQuery(const QSqlQuery &q)
     n.layer = q.value(8).toString();
     n.visible = q.value(9).toInt() != 0;
     n.collapsed = q.value(10).toInt() != 0;
-    n.deleted = q.value(11).toInt() != 0;
-    n.createdAt = q.value(12).toString();
-    n.updatedAt = q.value(13).toString();
-    n.deletedAt = q.value(14).toString();
+    n.scroll = q.value(11).toInt();
+    n.deleted = q.value(12).toInt() != 0;
+    n.createdAt = q.value(13).toString();
+    n.updatedAt = q.value(14).toString();
+    n.deletedAt = q.value(15).toString();
     return n;
 }
 
 const char *kNoteCols =
-    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,deleted,created_at,updated_at,deleted_at";
+    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,created_at,updated_at,deleted_at";
 } // namespace
 
 QList<Note> Storage::notes(bool includeDeleted) const
@@ -171,8 +175,8 @@ qint64 Storage::insertNote(Note n)
     const QString now = nowIso();
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,deleted,created_at,updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)"));
+        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,created_at,updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)"));
     q.addBindValue(bindText(n.title));
     q.addBindValue(bindText(n.content));
     q.addBindValue(bindText(n.themeId));
@@ -183,6 +187,7 @@ qint64 Storage::insertNote(Note n)
     q.addBindValue(bindText(n.layer));
     q.addBindValue(n.visible ? 1 : 0);
     q.addBindValue(n.collapsed ? 1 : 0);
+    q.addBindValue(n.scroll);
     q.addBindValue(now);
     q.addBindValue(now);
     if (!q.exec()) {
@@ -196,7 +201,7 @@ void Storage::updateNote(const Note &n)
 {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "UPDATE notes SET title=?,content=?,theme=?,x=?,y=?,w=?,h=?,layer=?,visible=?,collapsed=?,updated_at=?"
+        "UPDATE notes SET title=?,content=?,theme=?,x=?,y=?,w=?,h=?,layer=?,visible=?,collapsed=?,scroll=?,updated_at=?"
         " WHERE id=?"));
     q.addBindValue(bindText(n.title));
     q.addBindValue(bindText(n.content));
@@ -208,6 +213,7 @@ void Storage::updateNote(const Note &n)
     q.addBindValue(bindText(n.layer));
     q.addBindValue(n.visible ? 1 : 0);
     q.addBindValue(n.collapsed ? 1 : 0);
+    q.addBindValue(n.scroll);
     q.addBindValue(nowIso());
     q.addBindValue(n.id);
     q.exec();
@@ -259,6 +265,15 @@ void Storage::updateCollapsed(qint64 id, bool collapsed)
     QSqlQuery q(db());
     q.prepare(QStringLiteral("UPDATE notes SET collapsed=? WHERE id=?"));
     q.addBindValue(collapsed ? 1 : 0);
+    q.addBindValue(id);
+    q.exec();
+}
+
+void Storage::updateScroll(qint64 id, int scroll)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE notes SET scroll=? WHERE id=?"));
+    q.addBindValue(qMax(0, scroll));
     q.addBindValue(id);
     q.exec();
 }

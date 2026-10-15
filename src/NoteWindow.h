@@ -38,12 +38,18 @@ public:
     /// Brings the note back into focus and to the front.
     void activate();
 
+    /// Persists the current body scroll position (emits scrollEdited). Called
+    /// when the note is hidden or the app quits: the position is not tracked
+    /// incrementally (see NoteWindow.cpp).
+    void persistScroll();
+
 signals:
     void contentEdited(qint64 id, const QString &title, const QString &content);
     void geometryEdited(qint64 id, int x, int y, int w, int h);
     void themeEdited(qint64 id, const QString &themeId);
     void layerEdited(qint64 id, const QString &layer);
     void collapsedEdited(qint64 id, bool collapsed);
+    void scrollEdited(qint64 id, int scroll);
     void deleteRequested(qint64 id);
     void hideRequested(qint64 id);
     void newNoteRequested();
@@ -73,6 +79,11 @@ private:
     void commitTitleEdit();
     void scheduleSaveContent();
     void buildContextMenu(const QPoint &globalPos);
+
+    /// Re-applies the saved scroll position once the layout is ready. A no-op
+    /// while the note is collapsed (the body is hidden and its scrollbar range
+    /// is not meaningful yet); it runs again when the note is expanded.
+    void restoreScroll();
 
     /// Applies the *effective* layer: as long as the note has focus it stays in
     /// front of normal windows (top layer), even when configured as a desktop

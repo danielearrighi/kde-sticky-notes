@@ -24,6 +24,10 @@
   When focus moves elsewhere it returns to the configured layer, after a short
   deferred check (the context menu is a popup that takes focus instead of the
   note: while it is open the note stays in front).
+- **Remembered scroll position**: each note stores its body scroll position (new
+  `scroll` column on `notes`, with the usual add-column migration) and restores
+  it when the app is reopened. The value is not tracked incrementally: it is
+  saved when the note is hidden and when the app quits.
 
 ### Changed
 - **Autostart at login**: the generated `~/.config/autostart/sticky-notes.desktop`

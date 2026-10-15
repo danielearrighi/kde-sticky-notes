@@ -13,6 +13,7 @@
   "app.tab_trash": "Cestino",
   "app.tab_settings": "Impostazioni",
   "app.quit": "Esci dall'app",
+  "app.close_to_tray": "Riduci nella barra di sistema",
   "app.tray_show": "Mostra finestra",
   "app.db_error": "Impossibile aprire il database:\n%1",
   "app.autostart_comment": "Note adesive sul desktop",

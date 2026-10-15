@@ -105,6 +105,13 @@ void AppController::start(bool startHidden)
     setupTray();
     updateTrayVisibility();
 
+    // The scroll position is not tracked incrementally: flush it for every
+    // open note right before the app exits.
+    connect(QApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] {
+        for (NoteWindow *w : std::as_const(m_windows))
+            w->persistScroll();
+    });
+
     for (const Note &n : Storage::instance().notes(false))
         if (n.visible)
             ensureWindow(n);
@@ -160,6 +167,9 @@ NoteWindow *AppController::ensureWindow(const Note &note)
     });
     connect(w, &NoteWindow::collapsedEdited, this, [](qint64 id, bool collapsed) {
         Storage::instance().updateCollapsed(id, collapsed);
+    });
+    connect(w, &NoteWindow::scrollEdited, this, [](qint64 id, int scroll) {
+        Storage::instance().updateScroll(id, scroll);
     });
     connect(w, &NoteWindow::deleteRequested, this, &AppController::onDeleteNote);
     connect(w, &NoteWindow::hideRequested, this, [this](qint64 id) { onVisibilityToggled(id, false); });

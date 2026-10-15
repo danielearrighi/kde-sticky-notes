@@ -4,6 +4,7 @@
 
 class QGridLayout;
 class QLabel;
+class QPushButton;
 
 /// "Notes" tab: grid of cards with open / show-hide / delete actions.
 class NotesTab : public QWidget
@@ -15,6 +16,9 @@ public:
     /// Reloads the grid from Storage.
     void refresh();
 
+    /// Updates the top-right button label to match the "close to tray" setting.
+    void updateQuitButton();
+
 signals:
     void newNoteRequested();
     void openNoteRequested(qint64 id);
@@ -25,4 +29,5 @@ signals:
 private:
     QGridLayout *m_grid = nullptr;
     QLabel *m_empty = nullptr;
+    QPushButton *m_quit = nullptr;
 };

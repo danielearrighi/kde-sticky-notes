@@ -31,13 +31,14 @@ NotesTab::NotesTab(QWidget *parent)
     auto *add = UiHelpers::makeCardButton(QStringLiteral("+  ")
                                           + I18n::t(QStringLiteral("new_note")));
     connect(add, &QPushButton::clicked, this, &NotesTab::newNoteRequested);
-    auto *quit = UiHelpers::makeCardButton(I18n::t(QStringLiteral("app.quit")));
-    connect(quit, &QPushButton::clicked, this, &NotesTab::quitRequested);
+    m_quit = UiHelpers::makeCardButton(I18n::t(QStringLiteral("app.quit")));
+    connect(m_quit, &QPushButton::clicked, this, &NotesTab::quitRequested);
     head->addWidget(title);
     head->addStretch();
     head->addWidget(add);
-    head->addWidget(quit);
+    head->addWidget(m_quit);
     root->addLayout(head);
+    updateQuitButton();
 
     auto *hint = new QLabel(I18n::t(QStringLiteral("notes.hint")));
     hint->setWordWrap(true);
@@ -65,6 +66,8 @@ NotesTab::NotesTab(QWidget *parent)
 
 void NotesTab::refresh()
 {
+    updateQuitButton();
+
     // clear
     while (QLayoutItem *item = m_grid->takeAt(0)) {
         if (QWidget *w = item->widget())
@@ -127,4 +130,14 @@ void NotesTab::refresh()
             ++row;
         }
     }
+}
+
+void NotesTab::updateQuitButton()
+{
+    // The button only hides the hub when "close to system tray" is on (the tray
+    // menu offers the real quit), so reflect that in its label.
+    const bool closeToTray =
+        Storage::instance().setting(QStringLiteral("close_to_tray"), QStringLiteral("0")) == QLatin1String("1");
+    m_quit->setText(closeToTray ? I18n::t(QStringLiteral("app.close_to_tray"))
+                                : I18n::t(QStringLiteral("app.quit")));
 }

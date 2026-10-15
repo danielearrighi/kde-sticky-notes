@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QTextEdit>
+#include <QScrollBar>
 #include <QToolButton>
 #include <QMenu>
 #include <QTimer>
@@ -205,6 +206,13 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     clampToScreen();     // repairs any saved off-screen positions
     applySize();
     applyMargins();
+
+    // Restore the saved scroll position. The document layout (and therefore
+    // the scrollbar range) is only complete once the event loop runs, so the
+    // value is applied after the current event returns (see restoreScroll()).
+    // There is no incremental tracking while scrolling: the position is
+    // persisted when the note is hidden or the app quits (see persistScroll()).
+    restoreScroll();
 }
 
 NoteWindow::~NoteWindow()
@@ -351,6 +359,7 @@ void NoteWindow::setVisibleState(bool visible)
         m_focusLayerTimer->stop();
         m_raisedForFocus = false;
         applyEffectiveLayer();
+        persistScroll();
     }
     setVisible(visible);
 }
@@ -486,6 +495,27 @@ void NoteWindow::scheduleSaveContent()
     m_saveTimer->start();
 }
 
+void NoteWindow::persistScroll()
+{
+    // Read the live value at persist time instead of tracking every scroll
+    // event: only the final position matters when the note is hidden or the
+    // app quits.
+    if (!m_body)
+        return;
+    m_note.scroll = m_body->verticalScrollBar()->value();
+    emit scrollEdited(m_note.id, m_note.scroll);
+}
+
+void NoteWindow::restoreScroll()
+{
+    if (m_collapsed || m_note.scroll <= 0)
+        return;
+    const int scroll = m_note.scroll;
+    QTimer::singleShot(0, this, [this, scroll] {
+        m_body->verticalScrollBar()->setValue(scroll);
+    });
+}
+
 void NoteWindow::applyCollapsedVisuals()
 {
     m_body->setVisible(!m_collapsed);
@@ -500,9 +530,13 @@ void NoteWindow::toggleCollapse()
 {
     m_collapsed = !m_collapsed;
     m_note.collapsed = m_collapsed;
+    if (m_collapsed)
+        persistScroll();   // the body disappears: save its position first
     applyCollapsedVisuals();
     applySize();
     applyMargins();
+    if (!m_collapsed)
+        restoreScroll();
     emit collapsedEdited(m_note.id, m_collapsed);
 }
 
