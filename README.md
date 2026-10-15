@@ -5,7 +5,7 @@ surfaces**: no decorations, **outside the taskbar** and **outside Alt+Tab**,
 freely positionable on the desktop. An icon in the taskbar opens the **hub** with
 the note grid, trash and settings.
 
-![Sticky Notes: colored notes on the desktop and the hub with the note grid](screens/screenshot.png)
+![Sticky Notes: colored notes on the desktop and the hub with the note grid](screens/sticky-notes.png)
 
 ---
 
@@ -33,6 +33,8 @@ the note grid, trash and settings.
 - **Settings**: default theme and position, font and size, autostart, delete
   confirmation, data path, **theme editor** with color picker (body, title bar,
   text).
+
+![Sticky Notes: Settings window](screens/settings-window.png)
 
 ### System
 - Local **SQLite** (`~/.local/share/StickyNotes/notes.db`) for notes, themes,
