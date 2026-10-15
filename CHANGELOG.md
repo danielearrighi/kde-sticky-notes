@@ -40,6 +40,11 @@
 - **Defaults** for a new database: **Random** theme, **on the desktop** position
   (*bottom* layer), **230×190 px** size, **DejaVu Sans** font (if available) at
   **9 pt**.
+- **Rounded notes with a drop shadow**: notes now have 3 px rounded corners and a
+  small soft shadow. The window is translucent and paints its background by hand
+  (`NoteWindow::paintEvent`): the layer-shell surface is ~7 px larger than the
+  note on every side to leave room for the shadow, and `applyMargins()`/`applySize()`
+  compensate so the note keeps its saved position and size.
 
 ### Fixed
 - **Note body bottom padding**: when the text reached the end of the note,

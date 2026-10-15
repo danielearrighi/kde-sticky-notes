@@ -15,6 +15,7 @@
 #include <QMenu>
 #include <QTimer>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QIcon>
 #include <QApplication>
@@ -37,6 +38,12 @@ constexpr int kTitleHeight = 30;
 constexpr int kResizeGrip = 16;
 constexpr int kMinW = 160;
 constexpr int kMinH = 120;
+// Rounded corners of the note and the transparent border left around it to
+// draw a small drop shadow. The layer-shell surface is kShadowMargin larger
+// than the note on every side; applyMargins() compensates the offset so the
+// note keeps its saved position.
+constexpr int kCornerRadius = 4;
+constexpr int kShadowMargin = 8;
 // Inner padding of the note body. The same value is used for QTextDocument's
 // margin (= top/left/right/bottom padding of the text) and for the extra
 // bottom padding of the editor (see applyStyle()): without it, when the caret
@@ -73,11 +80,12 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     setWindowTitle(note.title.isEmpty() ? I18n::t(QStringLiteral("note.default_title"))
                                         : note.title);
     setAttribute(Qt::WA_StyledBackground, true);
+    setAttribute(Qt::WA_TranslucentBackground, true);
     setObjectName(QStringLiteral("noteWindow"));
     setFocusPolicy(Qt::StrongFocus);
 
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(0, 0, 0, 0);
+    root->setContentsMargins(kShadowMargin, kShadowMargin, kShadowMargin, kShadowMargin);
     root->setSpacing(0);
 
     // ---- title bar ----
@@ -229,7 +237,9 @@ void NoteWindow::configureLayerShell()
 void NoteWindow::applyMargins()
 {
     if (m_layer) {
-        m_layer->setMargins(QMargins(m_note.x, m_note.y, 0, 0));
+        // The surface is kShadowMargin larger than the note on every side (see
+        // kShadowMargin): shift it so the note stays at (m_note.x, m_note.y).
+        m_layer->setMargins(QMargins(m_note.x - kShadowMargin, m_note.y - kShadowMargin, 0, 0));
 
         // The layer-shell state (margin included) is double-buffered: the
         // compositor applies it only on the next wl_surface commit.
@@ -246,9 +256,11 @@ void NoteWindow::applySize()
     // Collapsed: the surface is as tall as the title bar alone. m_note.h stays
     // the "expanded" height and is never overwritten by the collapsed state.
     const int h = m_collapsed ? kTitleHeight : m_note.h;
+    // The surface also carries the transparent border used for the shadow.
+    const QSize surface(m_note.w + 2 * kShadowMargin, h + 2 * kShadowMargin);
     if (m_layer)
-        m_layer->setDesiredSize(QSize(m_note.w, h));
-    resize(m_note.w, h);
+        m_layer->setDesiredSize(surface);
+    resize(surface);
 }
 
 void NoteWindow::clampToScreen()
@@ -381,8 +393,12 @@ void NoteWindow::applyStyle()
     const int fontSize = Storage::instance().setting(QStringLiteral("font_size"), QStringLiteral("9")).toInt();
 
     setStyleSheet(QStringLiteral(
-                      "#noteWindow { background-color: %1; }"
-                      "#titleBar { background-color: %2; }"
+                      // The note background and its title strip are painted by
+                      // hand in paintEvent() (rounded corners + drop shadow):
+                      // here the two containers are just made transparent and
+                      // the widgets drawn on top of them are styled.
+                      "#noteWindow { background: transparent; }"
+                      "#titleBar { background: transparent; }"
                       "#titleText { color: %3; font-weight: bold; }"
                       "#titleEdit { color: %3; background: transparent; border: none; font-weight: bold; }"
                       "#resizeGrip { color: %2; background: transparent; font-size: 10px; }"
@@ -435,6 +451,10 @@ void NoteWindow::applyStyle()
     QTextCharFormat fmt = c.charFormat();
     fmt.setForeground(QColor(m_theme.text));
     m_body->setCurrentCharFormat(fmt);
+
+    // The note background is painted by hand from m_theme (see paintEvent()):
+    // force a repaint so a theme change is reflected right away.
+    update();
 }
 
 void NoteWindow::beginTitleEdit()
@@ -488,11 +508,49 @@ void NoteWindow::toggleCollapse()
 
 // ------------------------------------------------------------ interaction
 
+void NoteWindow::paintEvent(QPaintEvent *event)
+{
+    Q_UNUSED(event);
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    // The note occupies the surface minus the transparent shadow border.
+    const QRectF card(kShadowMargin, kShadowMargin,
+                      width() - 2.0 * kShadowMargin, height() - 2.0 * kShadowMargin);
+
+    // Small drop shadow: a few concentric rounded rects whose alpha grows
+    // toward the note, so it looks slightly raised above the desktop.
+    p.setPen(Qt::NoPen);
+    for (int i = kShadowMargin; i >= 1; --i) {
+        const qreal t = qreal(kShadowMargin - i + 1) / kShadowMargin;   // 0 outer → 1 inner
+        const int alpha = int(16.0 * t * t);
+        if (alpha <= 0)
+            continue;
+        p.setBrush(QColor(0, 0, 0, alpha));
+        p.drawRoundedRect(card.adjusted(-i, -i, i, i), kCornerRadius + i, kCornerRadius + i);
+    }
+
+    // Rounded background, clipped to the corners.
+    QPainterPath path;
+    path.addRoundedRect(card, kCornerRadius, kCornerRadius);
+    p.fillPath(path, QColor(m_theme.body));
+
+    // Title strip, clipped to the same path so it follows the rounded top
+    // corners (all four when the note is collapsed and the title bar alone
+    // fills the whole card).
+    p.save();
+    p.setClipPath(path);
+    p.fillRect(QRectF(card.left(), card.top(), card.width(), m_titleBar->height()),
+               QColor(m_theme.titleBar));
+    p.restore();
+}
+
 void NoteWindow::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     const QSize sz = event->size();
-    m_resizeGrip->move(sz.width() - kResizeGrip, sz.height() - kResizeGrip);
+    m_resizeGrip->move(sz.width() - kShadowMargin - kResizeGrip,
+                       sz.height() - kShadowMargin - kResizeGrip);
     m_resizeGrip->raise();
 }
 
