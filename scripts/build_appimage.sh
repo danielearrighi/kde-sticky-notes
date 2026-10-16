@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build a Sticky Notes AppImage.
 #
-# Produces sticky-notes-<version>-<arch>.AppImage in this directory (scripts/).
+# Produces release/sticky-notes-<version>-<arch>.AppImage (same folder as the
+# plain-binary release from scripts/build_release.sh).
 # It follows docs/APPIMAGE.md: the Qt Wayland platform plugin and the LayerShellQt
 # shell integration are forced in (the app only runs on KDE Plasma / wlroots
 # Wayland), and the KDE Plasma platform theme and Breeze style are deployed so the
@@ -165,7 +166,8 @@ rm -f "$appdir/usr/plugins/platformthemes/libqgtk3.so"
 
 # --- 5. Package ------------------------------------------------------------
 
-output="$here/sticky-notes-$version-$arch.AppImage"
+output="$root/release/sticky-notes-$version-$arch.AppImage"
+mkdir -p "$root/release"
 rm -f "$output"
 log "Creating $output"
 ARCH="$arch" "$appimage_tool" --runtime-file "$runtime" "$appdir" "$output"

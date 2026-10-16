@@ -9,3 +9,6 @@ docs/
 scripts/tools/
 scripts/AppDir/
 scripts/*.AppImage
+
+# build_release.sh artifacts
+release/
