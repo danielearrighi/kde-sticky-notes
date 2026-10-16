@@ -508,8 +508,9 @@ void NoteWindow::persistScroll()
 
 void NoteWindow::restoreScroll()
 {
-    if (m_collapsed || m_note.scroll <= 0)
+    if (m_collapsed)
         return;
+
     const int scroll = m_note.scroll;
     QTimer::singleShot(0, this, [this, scroll] {
         m_body->verticalScrollBar()->setValue(scroll);
