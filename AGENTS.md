@@ -24,7 +24,8 @@ cmake --build build
 ## Architecture
 
 Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
-`src/main.cpp` → `AppController` wires everything.
+`src/main.cpp` → `AppController` wires everything. The hub tab widgets live under
+`src/tabs/`.
 
 - `Storage` is a singleton over SQLite at `~/.local/share/StickyNotes/notes.db`;
   tables are created in `Storage::ensureSchema()`, which also runs a lightweight
@@ -33,9 +34,10 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   framework. There is no pre-existing file to run against — delete `notes.db` to
   reset state.
 - `NoteWindow` = one layer-shell note (title bar, Markdown body, context menu,
-  drag/resize). `HubWindow` = thin `QMainWindow` shell over three tab widgets —
-  `NotesTab` (grid), `TrashTab`, `SettingsTab` — which own their own widgets and
-  emit signals; `HubWindow` re-emits them so `AppController` is unchanged.
+  drag/resize). `HubWindow` = thin `QMainWindow` shell over the tab widgets in
+  `src/tabs/` — `NotesTab` (grid), `TrashTab`, `SettingsTab` (preferences, themes
+  and backup & restore), `InfoTab` — which own their own widgets and emit
+  signals; `HubWindow` re-emits them so `AppController` is unchanged.
   Shared UI helpers (`plainSnippet`, `makeCardButton`, `swatchIcon`, `untitled`,
   date formatting) live in `UiHelpers`. `Themes` = builtin palette; `I18n` =
   runtime translations (symbolic keys, `resources/i18n/*.json`), selected by the
@@ -84,5 +86,5 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   need instead of reading whole sources: every file you read stays in the
   conversation and bloats the context window on each following request.
 - The hub is split per tab: open/attach only the tab you are working on
-  (`NotesTab`, `TrashTab` or `SettingsTab`) instead of `HubWindow.cpp`, which is
-  now a thin shell.
+  (`src/tabs/NotesTab`, `TrashTab`, `SettingsTab` or `InfoTab`)
+  instead of `HubWindow.cpp`, which is now a thin shell.

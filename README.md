@@ -59,7 +59,9 @@ rm -f ~/.local/bin/sticky-notes \
   and build your own themes with the color picker in the settings.
 - **Always on top or on the desktop** — per note, from the context menu.
 - **Manage notes from the hub** — the taskbar icon opens a grid of notes (open,
-  hide, delete, new) plus a **trash** and the **settings**.
+  hide, delete, new) plus a **trash** and the **settings**, where you can also
+  back up and restore your notes.
+- **Info** — Qt/libraries versions, the data path and the author.
 - **Autostart and tray** — start the notes at login; optionally keep the app
   running in the system tray when the hub is closed.
 - **Single instance** — launching the app again just brings the hub to the front.

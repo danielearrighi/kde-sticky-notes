@@ -7,9 +7,10 @@ class QCloseEvent;
 class NotesTab;
 class TrashTab;
 class SettingsTab;
+class InfoTab;
 
-/// Main window (taskbar icon): hosts the three tabs and forwards their signals
-/// to AppController. Each tab's logic lives in its own class.
+/// Main window (taskbar icon): hosts the tabs and forwards their signals to
+/// AppController. Each tab's logic lives in its own class.
 class HubWindow : public QMainWindow
 {
     Q_OBJECT
@@ -28,6 +29,8 @@ signals:
     void purgeNoteRequested(qint64 id);
     void purgeAllRequested();
     void settingsChanged();
+    /// A backup was restored: the current notes were replaced.
+    void backupRestored();
     void quitRequested();
 
 protected:
@@ -38,4 +41,5 @@ private:
     NotesTab *m_notes = nullptr;
     TrashTab *m_trash = nullptr;
     SettingsTab *m_settings = nullptr;
+    InfoTab *m_info = nullptr;
 };

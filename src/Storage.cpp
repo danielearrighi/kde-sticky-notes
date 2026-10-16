@@ -10,6 +10,11 @@
 #include <QDebug>
 #include <QStringList>
 #include <QVariant>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
 
 namespace {
 const char *kConn = "sticky-notes";
@@ -417,4 +422,164 @@ void Storage::setSetting(const QString &key, const QString &value)
     q.addBindValue(key);
     q.addBindValue(value);
     q.exec();
+}
+
+// ---------------------------------------------------------------- backup
+
+namespace {
+QJsonObject noteToJson(const Note &n)
+{
+    QJsonObject o;
+    o[QStringLiteral("title")] = n.title;
+    o[QStringLiteral("content")] = n.content;
+    o[QStringLiteral("theme")] = n.themeId;
+    o[QStringLiteral("x")] = n.x;
+    o[QStringLiteral("y")] = n.y;
+    o[QStringLiteral("w")] = n.w;
+    o[QStringLiteral("h")] = n.h;
+    o[QStringLiteral("layer")] = n.layer;
+    o[QStringLiteral("visible")] = n.visible;
+    o[QStringLiteral("collapsed")] = n.collapsed;
+    o[QStringLiteral("scroll")] = n.scroll;
+    o[QStringLiteral("deleted")] = n.deleted;
+    o[QStringLiteral("created_at")] = n.createdAt;
+    o[QStringLiteral("updated_at")] = n.updatedAt;
+    o[QStringLiteral("deleted_at")] = n.deletedAt;
+    return o;
+}
+
+QJsonObject themeToJson(const Theme &t)
+{
+    QJsonObject o;
+    o[QStringLiteral("id")] = t.id;
+    o[QStringLiteral("name")] = t.name;
+    o[QStringLiteral("body")] = t.body;
+    o[QStringLiteral("title_bar")] = t.titleBar;
+    o[QStringLiteral("text_color")] = t.text;
+    o[QStringLiteral("sort")] = t.sort;
+    o[QStringLiteral("builtin")] = t.builtin;
+    return o;
+}
+} // namespace
+
+bool Storage::exportBackup(const QString &path, QString *errorOut) const
+{
+    QJsonArray noteArr;
+    for (const Note &n : notes(true))
+        noteArr.append(noteToJson(n));
+
+    QJsonArray themeArr;
+    for (const Theme &t : themes())
+        themeArr.append(themeToJson(t));
+
+    QJsonObject root;
+    root[QStringLiteral("app")] = QStringLiteral("sticky-notes");
+    root[QStringLiteral("version")] = 1;
+    root[QStringLiteral("exported_at")] = nowIso();
+    root[QStringLiteral("notes")] = noteArr;
+    root[QStringLiteral("themes")] = themeArr;
+
+    // QSaveFile writes to a temporary file and replaces the target atomically on
+    // commit: a failed backup never leaves a half-written file behind.
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (errorOut)
+            *errorOut = f.errorString();
+        return false;
+    }
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!f.commit()) {
+        if (errorOut)
+            *errorOut = f.errorString();
+        return false;
+    }
+    return true;
+}
+
+bool Storage::importBackup(const QString &path, bool replaceExisting, QString *errorOut)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (errorOut)
+            *errorOut = f.errorString();
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &parseError);
+    const QJsonObject root = doc.object();
+    if (doc.isNull() || !doc.isObject()
+        || root.value(QStringLiteral("app")).toString() != QStringLiteral("sticky-notes")
+        || !root.value(QStringLiteral("notes")).isArray()) {
+        if (errorOut)
+            *errorOut = parseError.errorString().isEmpty()
+                            ? QStringLiteral("not a Sticky Notes backup")
+                            : parseError.errorString();
+        return false;
+    }
+
+    QSqlDatabase database = db();
+    database.transaction();
+
+    // Themes first: the imported notes reference them by id.
+    for (const QJsonValue &v : root.value(QStringLiteral("themes")).toArray()) {
+        const QJsonObject o = v.toObject();
+        Theme t;
+        t.id = o.value(QStringLiteral("id")).toString();
+        if (t.id.isEmpty())
+            continue;
+        t.name = o.value(QStringLiteral("name")).toString();
+        t.body = o.value(QStringLiteral("body")).toString();
+        t.titleBar = o.value(QStringLiteral("title_bar")).toString();
+        t.text = o.value(QStringLiteral("text_color")).toString();
+        t.sort = o.value(QStringLiteral("sort")).toInt();
+        t.builtin = o.value(QStringLiteral("builtin")).toBool(true);
+        upsertTheme(t);
+    }
+
+    if (replaceExisting) {
+        QSqlQuery del(database);
+        del.exec(QStringLiteral("DELETE FROM notes"));
+    }
+
+    QSqlQuery ins(database);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,"
+        "deleted,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+    const QString now = nowIso();
+    for (const QJsonValue &v : root.value(QStringLiteral("notes")).toArray()) {
+        const QJsonObject o = v.toObject();
+        const QString created = o.value(QStringLiteral("created_at")).toString();
+        const QString updated = o.value(QStringLiteral("updated_at")).toString();
+        ins.addBindValue(bindText(o.value(QStringLiteral("title")).toString()));
+        ins.addBindValue(bindText(o.value(QStringLiteral("content")).toString()));
+        ins.addBindValue(bindText(o.value(QStringLiteral("theme")).toString(QStringLiteral("giallo"))));
+        ins.addBindValue(o.value(QStringLiteral("x")).toInt(220));
+        ins.addBindValue(o.value(QStringLiteral("y")).toInt(160));
+        ins.addBindValue(o.value(QStringLiteral("w")).toInt(230));
+        ins.addBindValue(o.value(QStringLiteral("h")).toInt(190));
+        ins.addBindValue(bindText(o.value(QStringLiteral("layer")).toString(QStringLiteral("top"))));
+        ins.addBindValue(o.value(QStringLiteral("visible")).toBool(true) ? 1 : 0);
+        ins.addBindValue(o.value(QStringLiteral("collapsed")).toBool(false) ? 1 : 0);
+        ins.addBindValue(o.value(QStringLiteral("scroll")).toInt());
+        ins.addBindValue(o.value(QStringLiteral("deleted")).toBool(false) ? 1 : 0);
+        ins.addBindValue(created.isEmpty() ? now : created);
+        ins.addBindValue(updated.isEmpty() ? now : updated);
+        ins.addBindValue(bindText(o.value(QStringLiteral("deleted_at")).toString()));
+        if (!ins.exec()) {
+            qWarning() << "Storage::importBackup:" << ins.lastError().text();
+            database.rollback();
+            if (errorOut)
+                *errorOut = ins.lastError().text();
+            return false;
+        }
+    }
+
+    if (!database.commit()) {
+        if (errorOut)
+            *errorOut = database.lastError().text();
+        database.rollback();
+        return false;
+    }
+    return true;
 }

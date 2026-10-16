@@ -1,6 +1,7 @@
 #include "HubWindow.h"
 
 #include "I18n.h"
+#include "InfoTab.h"
 #include "NotesTab.h"
 #include "SettingsTab.h"
 #include "TrashTab.h"
@@ -17,11 +18,13 @@ HubWindow::HubWindow(QWidget *parent)
     m_notes = new NotesTab;
     m_trash = new TrashTab;
     m_settings = new SettingsTab;
+    m_info = new InfoTab;
 
     m_tabs = new QTabWidget(this);
     m_tabs->addTab(m_notes, I18n::t(QStringLiteral("app.tab_notes")));
     m_tabs->addTab(m_trash, I18n::t(QStringLiteral("app.tab_trash")));
     m_tabs->addTab(m_settings, I18n::t(QStringLiteral("app.tab_settings")));
+    m_tabs->addTab(m_info, I18n::t(QStringLiteral("app.tab_info")));
     setCentralWidget(m_tabs);
 
     // The hub exposes the same public interface as before (signals + refresh):
@@ -41,6 +44,8 @@ HubWindow::HubWindow(QWidget *parent)
     connect(m_settings, &SettingsTab::settingsChanged, m_notes, &NotesTab::updateQuitButton);
     // The trash dates use the date/time format: refresh them right away.
     connect(m_settings, &SettingsTab::dateFormatChanged, m_trash, &TrashTab::refresh);
+    // Restoring a backup replaces the notes: forward it so the app rebuilds.
+    connect(m_settings, &SettingsTab::backupRestored, this, &HubWindow::backupRestored);
 
     refresh();
 }

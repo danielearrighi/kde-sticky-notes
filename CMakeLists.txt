@@ -21,12 +21,17 @@ qt_add_executable(sticky-notes
     src/I18n.h            src/I18n.cpp
     src/NoteWindow.h      src/NoteWindow.cpp
     src/UiHelpers.h       src/UiHelpers.cpp
-    src/NotesTab.h        src/NotesTab.cpp
-    src/TrashTab.h        src/TrashTab.cpp
-    src/SettingsTab.h     src/SettingsTab.cpp
+    src/tabs/NotesTab.h        src/tabs/NotesTab.cpp
+    src/tabs/TrashTab.h        src/tabs/TrashTab.cpp
+    src/tabs/SettingsTab.h     src/tabs/SettingsTab.cpp
+    src/tabs/InfoTab.h         src/tabs/InfoTab.cpp
     src/HubWindow.h       src/HubWindow.cpp
     src/AppController.h   src/AppController.cpp
 )
+
+# The tab widgets live under src/tabs/: add both roots so the quoted includes
+# stay unqualified ("I18n.h" from a tab, "NotesTab.h" from the hub).
+target_include_directories(sticky-notes PRIVATE src src/tabs)
 
 # Translations are one JSON file per language, embedded as Qt resources. The
 # files may not exist yet: an empty glob is fine and CONFIGURE_DEPENDS makes a

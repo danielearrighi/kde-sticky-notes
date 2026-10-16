@@ -11,20 +11,23 @@ class QListWidget;
 class QPushButton;
 class QSpinBox;
 
-/// "Settings" tab: general preferences + theme editor.
+/// "Settings" tab: general preferences + theme editor + backup & restore.
 class SettingsTab : public QWidget
 {
     Q_OBJECT
 public:
     explicit SettingsTab(QWidget *parent = nullptr);
 
-    /// Reloads preferences and theme list from Storage.
+    /// Reloads preferences, theme list and note count from Storage.
     void refresh();
 
 signals:
     void settingsChanged();
     /// Emitted when the date/time format changed: the trash dates must be redrawn.
     void dateFormatChanged();
+    /// Emitted after a backup has been restored: the notes changed under the
+    /// app's feet, so open windows must be rebuilt.
+    void backupRestored();
 
 private:
     void buildUi();
@@ -34,6 +37,8 @@ private:
     void restoreCurrentTheme();
     void pickColorFor(QPushButton *button);
     static void applyColorToButton(QPushButton *b, const QString &hex);
+    void doBackup();
+    void doRestore();
 
     // general preferences
     QComboBox *m_language = nullptr;
@@ -60,5 +65,6 @@ private:
     QPushButton *m_themeDelete = nullptr;
     QPushButton *m_themeRestore = nullptr;
     QPushButton *m_themeSave = nullptr;
+
     QString m_editingThemeId;
 };

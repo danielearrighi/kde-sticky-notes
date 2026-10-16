@@ -45,6 +45,16 @@ public:
     QString setting(const QString &key, const QString &def = QString()) const;
     void setSetting(const QString &key, const QString &value);
 
+    // --- Backup ---
+    /// Writes the notes (and their themes) to a JSON backup file. Returns false
+    /// and sets errorOut on write failure.
+    bool exportBackup(const QString &path, QString *errorOut = nullptr) const;
+    /// Reads a JSON backup written by exportBackup(). With replaceExisting the
+    /// current notes are deleted before the backup ones are inserted; themes are
+    /// always upserted. Returns false and sets errorOut if the file is missing or
+    /// is not a Sticky Notes backup.
+    bool importBackup(const QString &path, bool replaceExisting, QString *errorOut = nullptr);
+
 private:
     Storage() = default;
     QSqlDatabase db() const;

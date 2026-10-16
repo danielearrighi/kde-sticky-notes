@@ -100,6 +100,7 @@ void AppController::start(bool startHidden)
     connect(m_hub, &HubWindow::purgeNoteRequested, this, &AppController::onPurgeNote);
     connect(m_hub, &HubWindow::purgeAllRequested, this, &AppController::onPurgeAll);
     connect(m_hub, &HubWindow::settingsChanged, this, &AppController::onSettingsChanged);
+    connect(m_hub, &HubWindow::backupRestored, this, &AppController::onBackupRestored);
     connect(m_hub, &HubWindow::quitRequested, this, &AppController::onQuitRequested);
 
     setupTray();
@@ -334,6 +335,22 @@ void AppController::onSettingsChanged()
         w->applyTheme(Storage::instance().note(w->noteId()).themeId);
     applyAutostart();
     updateTrayVisibility();
+}
+
+void AppController::onBackupRestored()
+{
+    // A restore replaces every note, so the old windows point to ids that no
+    // longer exist: close them all and reopen the visible notes of the backup.
+    const QList<qint64> ids = m_windows.keys();
+    for (qint64 id : ids)
+        removeWindow(id);
+
+    for (const Note &n : Storage::instance().notes(false))
+        if (n.visible)
+            ensureWindow(n);
+
+    if (m_hub)
+        m_hub->refresh();
 }
 
 bool AppController::closeToTrayEnabled() const

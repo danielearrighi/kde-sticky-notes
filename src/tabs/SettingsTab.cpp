@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFileDialog>
 #include <QFont>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -22,6 +23,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QVBoxLayout>
 
 SettingsTab::SettingsTab(QWidget *parent)
@@ -123,6 +125,18 @@ void SettingsTab::buildUi()
     }
     path->setTextInteractionFlags(Qt::TextSelectableByMouse);
     form->addRow(QString(), path);
+
+    // Backup & restore: quick actions right under the data path.
+    auto *backupCreate = UiHelpers::makeCardButton(I18n::t(QStringLiteral("backup.create")));
+    auto *backupRestore = UiHelpers::makeCardButton(I18n::t(QStringLiteral("backup.restore")));
+    auto *backupRow = new QHBoxLayout;
+    backupRow->setContentsMargins(0, 0, 0, 0);
+    backupRow->addWidget(backupCreate);
+    backupRow->addWidget(backupRestore);
+    backupRow->addStretch();
+    form->addRow(QString(), backupRow);
+    connect(backupCreate, &QPushButton::clicked, this, &SettingsTab::doBackup);
+    connect(backupRestore, &QPushButton::clicked, this, &SettingsTab::doRestore);
 
     // --- theme editor ---
     auto *themesBox = new QGroupBox(I18n::t(QStringLiteral("settings.themes_title")));
@@ -249,6 +263,60 @@ void SettingsTab::buildUi()
 void SettingsTab::refresh()
 {
     loadIntoUi();
+}
+
+void SettingsTab::doBackup()
+{
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir.isEmpty())
+        dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    const QString suggested = dir + QStringLiteral("/sticky-notes-backup-")
+                              + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmm"))
+                              + QStringLiteral(".json");
+
+    const QString path = QFileDialog::getSaveFileName(this,
+                                                      I18n::t(QStringLiteral("backup.save_title")),
+                                                      suggested,
+                                                      I18n::t(QStringLiteral("backup.filter")));
+    if (path.isEmpty())
+        return;
+
+    QString error;
+    if (Storage::instance().exportBackup(path, &error)) {
+        QMessageBox::information(this, I18n::t(QStringLiteral("backup.dialog_title")),
+                                 I18n::t(QStringLiteral("backup.done")).arg(path));
+    } else {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("backup.dialog_title")),
+                             I18n::t(QStringLiteral("backup.failed")).arg(error));
+    }
+}
+
+void SettingsTab::doRestore()
+{
+    const QString path = QFileDialog::getOpenFileName(this,
+                                                      I18n::t(QStringLiteral("backup.open_title")),
+                                                      QString(),
+                                                      I18n::t(QStringLiteral("backup.filter")));
+    if (path.isEmpty())
+        return;
+
+    if (QMessageBox::question(this, I18n::t(QStringLiteral("backup.restore_confirm_title")),
+                              I18n::t(QStringLiteral("backup.restore_confirm")))
+        != QMessageBox::Yes)
+        return;
+
+    QString error;
+    if (!Storage::instance().importBackup(path, true, &error)) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("backup.dialog_title")),
+                             I18n::t(QStringLiteral("backup.restore_failed")).arg(error));
+        return;
+    }
+
+    refresh();
+    // Rebuild the note windows before the (modal) confirmation is shown.
+    emit backupRestored();
+    QMessageBox::information(this, I18n::t(QStringLiteral("backup.dialog_title")),
+                             I18n::t(QStringLiteral("backup.restore_done")).arg(path));
 }
 
 void SettingsTab::applyColorToButton(QPushButton *b, const QString &hex)

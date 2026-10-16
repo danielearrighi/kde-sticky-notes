@@ -45,6 +45,7 @@ private slots:
     void onPurgeNote(qint64 id);
     void onPurgeAll();
     void onSettingsChanged();
+    void onBackupRestored();
     void onQuitRequested();
 
 private:
