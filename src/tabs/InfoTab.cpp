@@ -3,6 +3,7 @@
 #include "I18n.h"
 #include "Storage.h"
 
+#include <QCoreApplication>
 #include <QFont>
 #include <QHeaderView>
 #include <QLabel>
@@ -37,6 +38,7 @@ InfoTab::InfoTab(QWidget *parent)
 
     // Two-column grid: the first column is the field name, the second its value.
     const QList<QPair<QString, QString>> rows = {
+        {I18n::t(QStringLiteral("info.version_label")), QCoreApplication::applicationVersion()},
         {I18n::t(QStringLiteral("info.author_label")), I18n::t(QStringLiteral("info.author"))},
         {I18n::t(QStringLiteral("info.qt_label")), QString::fromLatin1(qVersion())},
         {I18n::t(QStringLiteral("info.libs_label")), I18n::t(QStringLiteral("info.libs_value"))},

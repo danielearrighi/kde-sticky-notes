@@ -92,6 +92,7 @@
   "backup.restore_failed": "Impossibile ripristinare il backup:\n%1",
   "info.heading": "Sticky Notes",
   "info.tagline": "Note adesive per il desktop su KDE Plasma (Wayland).",
+  "info.version_label": "Versione",
   "info.author_label": "Autore",
   "info.author": "Arrighi Daniele (daniele.arrighi@gmail.com)",
   "info.qt_label": "Versione Qt",

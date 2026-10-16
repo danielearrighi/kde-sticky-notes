@@ -4,10 +4,12 @@
 #include <QScreen>
 #include <QIcon>
 #include <QDebug>
+#include <QTextStream>
 
 #include "AppController.h"
 #include "I18n.h"
 #include "Storage.h"
+#include "Version.h"
 
 namespace {
 const char *kServerName = "sticky-notes-single-instance";
@@ -17,10 +19,19 @@ int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("StickyNotes"));
+    QApplication::setApplicationVersion(QStringLiteral(STICKY_NOTES_VERSION));
     QApplication::setApplicationDisplayName(QStringLiteral("Sticky Notes"));
     QApplication::setDesktopFileName(QStringLiteral("sticky-notes"));
     QApplication::setQuitOnLastWindowClosed(false);
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/sticky-notes.png")));
+
+    // --version: print and exit, before the single-instance probe (used by
+    // packaging/updater scripts).
+    if (QCoreApplication::arguments().contains(QStringLiteral("--version"))) {
+        QTextStream(stdout) << QCoreApplication::applicationName() << ' '
+                            << QCoreApplication::applicationVersion() << Qt::endl;
+        return 0;
+    }
 
     qWarning() << "[app] QPA platform:" << QGuiApplication::platformName()
                << "screen:" << QGuiApplication::primaryScreen()->geometry();

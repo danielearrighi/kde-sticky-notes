@@ -92,6 +92,7 @@
   "backup.restore_failed": "Could not restore the backup:\n%1",
   "info.heading": "Sticky Notes",
   "info.tagline": "Desktop sticky notes for KDE Plasma on Wayland.",
+  "info.version_label": "Version",
   "info.author_label": "Author",
   "info.author": "Arrighi Daniele (daniele.arrighi@gmail.com)",
   "info.qt_label": "Qt version",

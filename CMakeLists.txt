@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(sticky-notes VERSION 0.1.0 LANGUAGES CXX)
+project(sticky-notes VERSION 0.1.8 LANGUAGES CXX)
+
+# Version.h is generated from the project() VERSION above: bump that single line
+# to release a new version. The header is what the app reads at build time
+# (main.cpp, InfoTab.cpp).
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/generated)
+configure_file(src/Version.h.in ${CMAKE_BINARY_DIR}/generated/Version.h @ONLY)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +37,7 @@ qt_add_executable(sticky-notes
 
 # The tab widgets live under src/tabs/: add both roots so the quoted includes
 # stay unqualified ("I18n.h" from a tab, "NotesTab.h" from the hub).
-target_include_directories(sticky-notes PRIVATE src src/tabs)
+target_include_directories(sticky-notes PRIVATE src src/tabs ${CMAKE_BINARY_DIR}/generated)
 
 # Translations are one JSON file per language, embedded as Qt resources. The
 # files may not exist yet: an empty glob is fine and CONFIGURE_DEPENDS makes a

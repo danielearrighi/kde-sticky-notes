@@ -1,0 +1,6 @@
+#pragma once
+
+// Single source of truth: CMakeLists.txt (project(... VERSION ...)).
+// Generated into <build>/generated/Version.h by configure_file() at configure
+// time, so bumping the version is a one-line change in CMakeLists.txt.
+#define STICKY_NOTES_VERSION "@PROJECT_VERSION@"
