@@ -4,3 +4,8 @@ build/
 *.so
 docs/
 .vscode/
+
+# build_appimage.sh artifacts
+scripts/tools/
+scripts/AppDir/
+scripts/*.AppImage
