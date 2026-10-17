@@ -66,6 +66,44 @@ constexpr qreal kListIndentWidth = 25; //Default QTextListFormat indent.
 // is shrunk to something reasonable instead of being stored verbatim.
 constexpr int kMaxImageSide = 900;
 
+// ---- screen identity -------------------------------------------------------
+
+/// Key that identifies a monitor: its resolution plus the connector name, e.g.
+/// "2560x1440|DP-3". The resolution alone would collide between two identical
+/// monitors; the connector distinguishes them (stable as long as the monitor
+/// stays on the same port).
+QString screenKeyOf(const QScreen *s)
+{
+    if (!s)
+        return QString();
+    const QSize sz = s->geometry().size();
+    QString key = QString::number(sz.width()) + QLatin1Char('x') + QString::number(sz.height());
+    if (!s->name().isEmpty())
+        key += QLatin1Char('|') + s->name();
+    return key;
+}
+
+/// Connected screens with a real geometry (skips the transient QtWayland
+/// placeholder screen created while the outputs are reconfigured).
+QList<QScreen *> realScreens()
+{
+    QList<QScreen *> out;
+    for (QScreen *s : QGuiApplication::screens())
+        if (!s->geometry().isEmpty() && !s->availableGeometry().isEmpty())
+            out.append(s);
+    return out;
+}
+
+QScreen *screenForKey(const QString &key, const QList<QScreen *> &screens)
+{
+    if (key.isEmpty())
+        return nullptr;
+    for (QScreen *s : screens)
+        if (screenKeyOf(s) == key)
+            return s;
+    return nullptr;
+}
+
 QIcon colorIcon(const QString &hex)
 {
     QPixmap pm(14, 14);
@@ -307,9 +345,9 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     configureLayerShell();
     m_note.w = qMax(kMinW, m_note.w);
     m_note.h = qMax(kMinH, m_note.h);
-    clampToScreen();     // repairs any saved off-screen positions
-    applySize();
-    applyMargins();
+    // First placement: restores the per-screen position saved for the note's
+    // last screen (or maps it proportionally) and records the screen key.
+    placeOnScreens(true, false);
 
     // Restore the saved scroll position. The document layout (and therefore
     // the scrollbar range) is only complete once the event loop runs, so the
@@ -351,7 +389,11 @@ void NoteWindow::applyMargins()
     if (m_layer) {
         // The surface is kShadowMargin larger than the note on every side (see
         // kShadowMargin): shift it so the note stays at (m_note.x, m_note.y).
-        m_layer->setMargins(QMargins(m_note.x - kShadowMargin, m_note.y - kShadowMargin, 0, 0));
+        // m_note.x/y are relative to the screen's available area, while the
+        // layer-shell margin is relative to the output edge: add the offset of
+        // the available area inside the output (m_screenOrigin).
+        m_layer->setMargins(QMargins(m_screenOrigin.x() + m_note.x - kShadowMargin,
+                                     m_screenOrigin.y() + m_note.y - kShadowMargin, 0, 0));
 
         // The layer-shell state (margin included) is double-buffered: the
         // compositor applies it only on the next wl_surface commit.
@@ -377,43 +419,56 @@ void NoteWindow::applySize()
 
 void NoteWindow::clampToScreen()
 {
-    placeOnScreens(false);
+    placeOnScreens(false, false);
 }
 
 void NoteWindow::ensureOnScreen()
 {
-    placeOnScreens(true);
+    placeOnScreens(true, !m_placed);
+    m_placed = true;
 }
 
-void NoteWindow::placeOnScreens(bool proportional)
+void NoteWindow::placeOnScreens(bool proportional, bool forceEmit)
 {
     // Ignore the transient placeholder screen QtWayland creates while the real
-    // outputs are reconfigured (it has an empty geometry). Mapping onto it would
+    // outputs are reconfigured (it has an empty geometry): mapping onto it would
     // send every note to (0,0).
-    QList<QScreen *> screens;
-    for (QScreen *s : QGuiApplication::screens())
-        if (!s->availableGeometry().isEmpty())
-            screens.append(s);
-    QScreen *primary = QGuiApplication::primaryScreen();
-    if (primary && primary->availableGeometry().isEmpty())
-        primary = nullptr;
+    const QList<QScreen *> screens = realScreens();
     if (screens.isEmpty())
         return;
-    if (!primary)
+    QScreen *primary = QGuiApplication::primaryScreen();
+    if (!primary || !screens.contains(primary))
         primary = screens.first();
 
-    // The rect the note actually occupies: a collapsed note is only as tall as
-    // its title bar, but the width is unchanged.
+    const int oldX = m_note.x, oldY = m_note.y, oldW = m_note.w, oldH = m_note.h;
+    const QString oldKey = m_screenKey;
     const int h = m_collapsed ? kTitleHeight : m_note.h;
-    const QRect note(m_note.x, m_note.y, m_note.w, h);
+    const QSize noteSize(m_note.w, h);
 
-    // The screen showing the largest part of the note. Using the intersection
-    // (and not the bounding box of every screen) skips the gaps of non-adjacent
-    // monitor layouts, where no screen actually exists.
+    // Reference screen: the one the note is on (if still connected), otherwise
+    // its last available geometry (kept in m_screenRect), otherwise - at startup
+    // - the screen saved as the note's last screen. m_note.x/y are relative to
+    // that screen's available area.
+    QScreen *current = screenForKey(m_screenKey, screens);
+    QRect refAvail;
+    if (current)
+        refAvail = current->availableGeometry();
+    else if (m_screenRect.isValid())
+        refAvail = m_screenRect;
+    else if (QScreen *last = screenForKey(m_note.lastScreenKey, screens))
+        refAvail = last->availableGeometry();
+    const bool haveRef = refAvail.isValid();
+
+    // Global rect the note occupies now.
+    const QRect noteGlobal = haveRef
+                                 ? QRect(refAvail.topLeft() + QPoint(m_note.x, m_note.y), noteSize)
+                                 : QRect(QPoint(m_note.x, m_note.y), noteSize);
+
+    // Target: the screen the note overlaps the most (fallback: the primary).
     QScreen *target = primary;
     int bestArea = 0;
     for (QScreen *s : screens) {
-        const QRect inter = s->availableGeometry().intersected(note);
+        const QRect inter = s->availableGeometry().intersected(noteGlobal);
         const int area = inter.width() * inter.height();
         if (area > bestArea) {
             bestArea = area;
@@ -421,39 +476,51 @@ void NoteWindow::placeOnScreens(bool proportional)
         }
     }
 
-    // When the note ends up on a different screen (its old one is gone, or the
-    // geometry changed) keep the same relative position and map it onto the new
-    // screen, so the note stays visible and proportionally placed.
-    const QRect area = target->availableGeometry();
-    if (proportional && !m_screenRect.isEmpty() && m_screenRect != area) {
-        // Normalise over the *usable* range (screen minus the note size), so the
-        // mapping is symmetric: moving to another screen and back returns to the
-        // original position instead of drifting a little every time.
-        const int spanX = m_screenRect.width() - m_note.w;
-        const int spanY = m_screenRect.height() - h;
-        const qreal fx = spanX > 0
-                             ? qBound(0.0, qreal(m_note.x - m_screenRect.left()) / spanX, 1.0)
-                             : 0.0;
-        const qreal fy = spanY > 0
-                             ? qBound(0.0, qreal(m_note.y - m_screenRect.top()) / spanY, 1.0)
-                             : 0.0;
-        m_note.x = area.left() + qRound(fx * qMax(0, area.width() - m_note.w));
-        m_note.y = area.top() + qRound(fy * qMax(0, area.height() - h));
+    const QString targetKey = screenKeyOf(target);
+    const QRect targetAvail = target->availableGeometry();
+    const QRect targetRel(QPoint(0, 0), targetAvail.size());   // available area, relative
+
+    // On a screen change, restore the exact position saved for that screen; if
+    // there is none, map proportionally from the reference screen. The mapping is
+    // normalised over the *usable* range (screen minus the note size) so that
+    // moving away and back returns to the original position instead of drifting.
+    if (proportional && (!current || targetKey != m_screenKey)) {
+        const QRect stored = Storage::instance().notePosition(m_note.id, targetKey);
+        if (stored.isValid()) {
+            m_note.x = stored.x();
+            m_note.y = stored.y();
+            m_note.w = qMax(kMinW, stored.width());
+            m_note.h = qMax(kMinH, stored.height());
+        } else if (haveRef && refAvail != targetAvail) {
+            const int spanX = refAvail.width() - m_note.w;
+            const int spanY = refAvail.height() - h;
+            const qreal fx = spanX > 0 ? qBound(0.0, qreal(m_note.x) / spanX, 1.0) : 0.0;
+            const qreal fy = spanY > 0 ? qBound(0.0, qreal(m_note.y) / spanY, 1.0) : 0.0;
+            m_note.x = targetRel.left() + qRound(fx * qMax(0, targetRel.width() - m_note.w));
+            m_note.y = targetRel.top() + qRound(fy * qMax(0, targetRel.height() - h));
+        }
     }
 
+    const int hh = m_collapsed ? kTitleHeight : m_note.h;
     if (proportional) {
         // Guarantee the whole note is reachable again (its left/top part when
         // the note is wider/taller than the screen).
-        m_note.x = qBound(area.left(), m_note.x, area.left() + qMax(0, area.width() - m_note.w));
-        m_note.y = qBound(area.top(), m_note.y, area.top() + qMax(0, area.height() - h));
+        m_note.x = qBound(targetRel.left(), m_note.x,
+                          targetRel.left() + qMax(0, targetRel.width() - m_note.w));
+        m_note.y = qBound(targetRel.top(), m_note.y,
+                          targetRel.top() + qMax(0, targetRel.height() - hh));
     } else {
         const int keep = 60;   // how many pixels of the note always stay reachable
-        m_note.x = qBound(area.left() - m_note.w + keep, m_note.x, area.right() - keep);
-        m_note.y = qBound(area.top(), m_note.y, area.bottom() - keep);
+        m_note.x = qBound(targetRel.left() - m_note.w + keep, m_note.x, targetRel.right() - keep);
+        m_note.y = qBound(targetRel.top(), m_note.y, targetRel.bottom() - keep);
     }
 
-    const bool moved = (m_note.x != note.x() || m_note.y != note.y());
-    m_screenRect = area;   // the screen the note now lives on
+    m_screenKey = targetKey;
+    m_screenRect = targetAvail;
+    m_screenOrigin = targetAvail.topLeft() - target->geometry().topLeft();
+
+    const bool sizeChanged = (m_note.w != oldW || m_note.h != oldH);
+    const bool moved = (m_note.x != oldX || m_note.y != oldY || sizeChanged || targetKey != oldKey);
 
     // If the compositor dismissed the surface when its output went away, or the
     // QWindow still points at a screen that is no longer connected, re-map it on
@@ -466,11 +533,11 @@ void NoteWindow::placeOnScreens(bool proportional)
         show();
     }
 
-    if (moved || remap)
-        applyMargins();
+    applySize();
+    applyMargins();
 
-    if (moved)
-        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h);
+    if (moved || forceEmit)
+        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h, m_screenKey);
 }
 
 void NoteWindow::applyLayer(const QString &layer)
@@ -908,7 +975,7 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
         clampToScreen();
         applyMargins();
         if (wasDragging)
-            emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h);
+            emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h, m_screenKey);
     }
 
     if (m_dragging) {
@@ -946,10 +1013,10 @@ void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
         unsetCursor();
         clampToScreen();
         applyMargins();
-        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h);
+        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h, m_screenKey);
     } else if (m_resizing) {
         m_resizing = false;
-        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h);
+        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h, m_screenKey);
     }
     QWidget::mouseReleaseEvent(event);
 }

@@ -20,6 +20,9 @@ struct Note
     QString createdAt;
     QString updatedAt;
     QString deletedAt;
+    // Key of the screen the note was last placed on ("<W>x<H>|<connector>"),
+    // used to reopen it on the same monitor. Empty for notes never placed.
+    QString lastScreenKey;
 };
 
 struct Theme

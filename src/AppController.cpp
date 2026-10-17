@@ -175,8 +175,9 @@ NoteWindow *AppController::ensureWindow(const Note &note)
     connect(w, &NoteWindow::contentEdited, this, [](qint64 id, const QString &t, const QString &c) {
         Storage::instance().updateContent(id, t, c);
     });
-    connect(w, &NoteWindow::geometryEdited, this, [](qint64 id, int x, int y, int ww, int hh) {
-        Storage::instance().updateGeometry(id, x, y, ww, hh);
+    connect(w, &NoteWindow::geometryEdited, this, [](qint64 id, int x, int y, int ww, int hh,
+                                                     const QString &screenKey) {
+        Storage::instance().saveNotePlacement(id, x, y, ww, hh, screenKey);
     });
     connect(w, &NoteWindow::themeEdited, this, [](qint64 id, const QString &themeId) {
         Storage::instance().updateTheme(id, themeId);
@@ -210,6 +211,10 @@ NoteWindow *AppController::ensureWindow(const Note &note)
         }
     });
     connect(w, &NoteWindow::settingsRequested, this, &AppController::showHub);
+
+    // Records the first placement (per-screen position + last screen key) now
+    // that the signals are connected.
+    w->ensureOnScreen();
 
     w->show();
     return w;

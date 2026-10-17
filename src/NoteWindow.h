@@ -51,7 +51,7 @@ public:
 
 signals:
     void contentEdited(qint64 id, const QString &title, const QString &content);
-    void geometryEdited(qint64 id, int x, int y, int w, int h);
+    void geometryEdited(qint64 id, int x, int y, int w, int h, const QString &screenKey);
     void themeEdited(qint64 id, const QString &themeId);
     void layerEdited(qint64 id, const QString &layer);
     void collapsedEdited(qint64 id, bool collapsed);
@@ -80,12 +80,14 @@ private:
     void applySize();
     void clampToScreen();
 
-    /// Places the note on a connected screen and updates m_screenRect.
-    /// With \a proportional (a screen topology change) a note that no longer
-    /// overlaps any screen keeps its relative position and is mapped onto the
-    /// primary screen, fully visible; otherwise it is clamped into the screen it
-    /// already lives on (allowing the usual sliver overhang used while dragging).
-    void placeOnScreens(bool proportional);
+    /// Places the note on a connected screen and updates m_screenKey /
+    /// m_screenRect. With \a proportional a note that ends up on a different
+    /// screen keeps its relative position (or its saved per-screen position),
+    /// fully visible; otherwise it is clamped into the screen it is already on
+    /// (allowing the usual sliver overhang used while dragging). \a forceEmit
+    /// re-emits geometryEdited even when nothing moved (used for the first
+    /// placement, to record the per-screen position).
+    void placeOnScreens(bool proportional, bool forceEmit);
     void applyStyle();
     void refreshTitleLabel();
     void beginTitleEdit();
@@ -156,7 +158,15 @@ private:
     QSize m_resizeStartSize;
     bool m_loading = false;
 
-    /// Available geometry of the screen the note was last placed on. Used to
-    /// keep the relative position when that screen disappears.
+    /// Key of the screen the note is currently on ("<W>x<H>|<connector>").
+    QString m_screenKey;
+    /// Available geometry (global) of the screen the note is on. Kept even after
+    /// that screen disappears, as the source of the proportional mapping.
     QRect m_screenRect;
+    /// Offset of the available area inside the output (availableGeometry minus
+    /// geometry): normally (0,0), non-zero with a top/left panel. Added back when
+    /// setting the layer-shell margins.
+    QPoint m_screenOrigin;
+    /// False until the first placement has been persisted (see placeOnScreens).
+    bool m_placed = false;
 };

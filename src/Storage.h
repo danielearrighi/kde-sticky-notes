@@ -3,6 +3,8 @@
 #include "Models.h"
 
 #include <QList>
+#include <QPair>
+#include <QRect>
 #include <QString>
 
 class QSqlDatabase;
@@ -24,6 +26,15 @@ public:
     void updateNote(const Note &n);
     void updateContent(qint64 id, const QString &title, const QString &content);
     void updateGeometry(qint64 id, int x, int y, int w, int h);
+    /// Persists the geometry and records it under \a screenKey (per-screen
+    /// positions) and as the note's last screen. x,y are screen-relative.
+    void saveNotePlacement(qint64 id, int x, int y, int w, int h, const QString &screenKey);
+    /// Saved screen-relative position of a note on a given screen, or an invalid
+    /// QRect when the note has never been placed there.
+    QRect notePosition(qint64 id, const QString &screenKey) const;
+    /// Every saved per-screen position of a note (screen key -> rect), used by
+    /// the backup export.
+    QList<QPair<QString, QRect>> notePositions(qint64 id) const;
     void updateTheme(qint64 id, const QString &themeId);
     void updateLayer(qint64 id, const QString &layer);
     void updateCollapsed(qint64 id, bool collapsed);

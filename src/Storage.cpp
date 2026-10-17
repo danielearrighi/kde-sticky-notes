@@ -107,6 +107,19 @@ void Storage::ensureSchema()
         " key TEXT PRIMARY KEY,"
         " value TEXT)"));
 
+    // Per-screen note positions: where a note sits on each monitor, keyed by the
+    // screen key ("<W>x<H>|<connector>"). Separate from notes.x/y, which stays as
+    // the fallback / last known position.
+    q.exec(QStringLiteral(
+        "CREATE TABLE IF NOT EXISTS note_positions ("
+        " note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,"
+        " screen_key TEXT NOT NULL,"
+        " x INTEGER NOT NULL,"
+        " y INTEGER NOT NULL,"
+        " w INTEGER NOT NULL,"
+        " h INTEGER NOT NULL,"
+        " PRIMARY KEY (note_id, screen_key))"));
+
     // Lightweight migration for DBs created by older versions (the project has
     // no migration framework): adds the missing columns.
     QStringList cols;
@@ -118,6 +131,8 @@ void Storage::ensureSchema()
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0"));
     if (!cols.contains(QStringLiteral("scroll")))
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN scroll INTEGER NOT NULL DEFAULT 0"));
+    if (!cols.contains(QStringLiteral("last_screen_key")))
+        q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN last_screen_key TEXT NOT NULL DEFAULT ''"));
 }
 
 // ---------------------------------------------------------------- note
@@ -142,11 +157,12 @@ Note noteFromQuery(const QSqlQuery &q)
     n.createdAt = q.value(13).toString();
     n.updatedAt = q.value(14).toString();
     n.deletedAt = q.value(15).toString();
+    n.lastScreenKey = q.value(16).toString();
     return n;
 }
 
 const char *kNoteCols =
-    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,created_at,updated_at,deleted_at";
+    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,created_at,updated_at,deleted_at,last_screen_key";
 } // namespace
 
 QList<Note> Storage::notes(bool includeDeleted) const
@@ -180,8 +196,8 @@ qint64 Storage::insertNote(Note n)
     const QString now = nowIso();
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,created_at,updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)"));
+        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,last_screen_key,created_at,updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)"));
     q.addBindValue(bindText(n.title));
     q.addBindValue(bindText(n.content));
     q.addBindValue(bindText(n.themeId));
@@ -193,6 +209,7 @@ qint64 Storage::insertNote(Note n)
     q.addBindValue(n.visible ? 1 : 0);
     q.addBindValue(n.collapsed ? 1 : 0);
     q.addBindValue(n.scroll);
+    q.addBindValue(bindText(n.lastScreenKey));
     q.addBindValue(now);
     q.addBindValue(now);
     if (!q.exec()) {
@@ -245,6 +262,62 @@ void Storage::updateGeometry(qint64 id, int x, int y, int w, int h)
     q.addBindValue(h);
     q.addBindValue(id);
     q.exec();
+}
+
+void Storage::saveNotePlacement(qint64 id, int x, int y, int w, int h, const QString &screenKey)
+{
+    updateGeometry(id, x, y, w, h);
+
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE notes SET last_screen_key=? WHERE id=?"));
+    q.addBindValue(bindText(screenKey));
+    q.addBindValue(id);
+    q.exec();
+
+    // The per-screen position is only meaningful for a real screen key (an
+    // empty key means "no screen": keep the fallback only).
+    if (screenKey.isEmpty())
+        return;
+    QSqlQuery p(db());
+    p.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO note_positions (note_id,screen_key,x,y,w,h) VALUES (?,?,?,?,?,?)"));
+    p.addBindValue(id);
+    p.addBindValue(screenKey);
+    p.addBindValue(x);
+    p.addBindValue(y);
+    p.addBindValue(w);
+    p.addBindValue(h);
+    if (!p.exec())
+        qWarning() << "Storage::saveNotePlacement:" << p.lastError().text();
+}
+
+QRect Storage::notePosition(qint64 id, const QString &screenKey) const
+{
+    if (screenKey.isEmpty())
+        return {};
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "SELECT x,y,w,h FROM note_positions WHERE note_id=? AND screen_key=?"));
+    q.addBindValue(id);
+    q.addBindValue(screenKey);
+    if (q.exec() && q.next())
+        return QRect(q.value(0).toInt(), q.value(1).toInt(), q.value(2).toInt(), q.value(3).toInt());
+    return {};
+}
+
+QList<QPair<QString, QRect>> Storage::notePositions(qint64 id) const
+{
+    QList<QPair<QString, QRect>> out;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "SELECT screen_key,x,y,w,h FROM note_positions WHERE note_id=? ORDER BY screen_key"));
+    q.addBindValue(id);
+    if (!q.exec())
+        return out;
+    while (q.next())
+        out.append({q.value(0).toString(),
+                    QRect(q.value(1).toInt(), q.value(2).toInt(), q.value(3).toInt(), q.value(4).toInt())});
+    return out;
 }
 
 void Storage::updateTheme(qint64 id, const QString &themeId)
@@ -427,7 +500,7 @@ void Storage::setSetting(const QString &key, const QString &value)
 // ---------------------------------------------------------------- backup
 
 namespace {
-QJsonObject noteToJson(const Note &n)
+QJsonObject noteToJson(const Note &n, const QList<QPair<QString, QRect>> &positions)
 {
     QJsonObject o;
     o[QStringLiteral("title")] = n.title;
@@ -445,6 +518,21 @@ QJsonObject noteToJson(const Note &n)
     o[QStringLiteral("created_at")] = n.createdAt;
     o[QStringLiteral("updated_at")] = n.updatedAt;
     o[QStringLiteral("deleted_at")] = n.deletedAt;
+    o[QStringLiteral("last_screen_key")] = n.lastScreenKey;
+
+    // Per-screen positions (screen key -> rect), so a restored backup keeps the
+    // exact placement on every monitor the note has been on.
+    QJsonArray posArr;
+    for (const QPair<QString, QRect> &p : positions) {
+        QJsonObject po;
+        po[QStringLiteral("screen_key")] = p.first;
+        po[QStringLiteral("x")] = p.second.x();
+        po[QStringLiteral("y")] = p.second.y();
+        po[QStringLiteral("w")] = p.second.width();
+        po[QStringLiteral("h")] = p.second.height();
+        posArr.append(po);
+    }
+    o[QStringLiteral("positions")] = posArr;
     return o;
 }
 
@@ -466,7 +554,7 @@ bool Storage::exportBackup(const QString &path, QString *errorOut) const
 {
     QJsonArray noteArr;
     for (const Note &n : notes(true))
-        noteArr.append(noteToJson(n));
+        noteArr.append(noteToJson(n, notePositions(n.id)));
 
     QJsonArray themeArr;
     for (const Theme &t : themes())
@@ -545,7 +633,10 @@ bool Storage::importBackup(const QString &path, bool replaceExisting, QString *e
     QSqlQuery ins(database);
     ins.prepare(QStringLiteral(
         "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,"
-        "deleted,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        "deleted,last_screen_key,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+    QSqlQuery posIns(database);
+    posIns.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO note_positions (note_id,screen_key,x,y,w,h) VALUES (?,?,?,?,?,?)"));
     const QString now = nowIso();
     for (const QJsonValue &v : root.value(QStringLiteral("notes")).toArray()) {
         const QJsonObject o = v.toObject();
@@ -563,6 +654,7 @@ bool Storage::importBackup(const QString &path, bool replaceExisting, QString *e
         ins.addBindValue(o.value(QStringLiteral("collapsed")).toBool(false) ? 1 : 0);
         ins.addBindValue(o.value(QStringLiteral("scroll")).toInt());
         ins.addBindValue(o.value(QStringLiteral("deleted")).toBool(false) ? 1 : 0);
+        ins.addBindValue(bindText(o.value(QStringLiteral("last_screen_key")).toString()));
         ins.addBindValue(created.isEmpty() ? now : created);
         ins.addBindValue(updated.isEmpty() ? now : updated);
         ins.addBindValue(bindText(o.value(QStringLiteral("deleted_at")).toString()));
@@ -572,6 +664,29 @@ bool Storage::importBackup(const QString &path, bool replaceExisting, QString *e
             if (errorOut)
                 *errorOut = ins.lastError().text();
             return false;
+        }
+
+        // Per-screen positions of this note (absent in old backups). They are
+        // keyed by the note id just inserted.
+        const qint64 newId = ins.lastInsertId().toLongLong();
+        for (const QJsonValue &pv : o.value(QStringLiteral("positions")).toArray()) {
+            const QJsonObject po = pv.toObject();
+            const QString key = po.value(QStringLiteral("screen_key")).toString();
+            if (key.isEmpty())
+                continue;
+            posIns.addBindValue(newId);
+            posIns.addBindValue(key);
+            posIns.addBindValue(po.value(QStringLiteral("x")).toInt());
+            posIns.addBindValue(po.value(QStringLiteral("y")).toInt());
+            posIns.addBindValue(po.value(QStringLiteral("w")).toInt(230));
+            posIns.addBindValue(po.value(QStringLiteral("h")).toInt(190));
+            if (!posIns.exec()) {
+                qWarning() << "Storage::importBackup (positions):" << posIns.lastError().text();
+                database.rollback();
+                if (errorOut)
+                    *errorOut = posIns.lastError().text();
+                return false;
+            }
         }
     }
 
