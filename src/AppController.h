@@ -9,7 +9,9 @@ class HubWindow;
 class NoteWindow;
 class QEvent;
 class QLocalServer;
+class QScreen;
 class QSystemTrayIcon;
+class QTimer;
 
 /// Coordinates the hub, note windows, persistence, single instance and autostart.
 class AppController : public QObject
@@ -38,7 +40,6 @@ protected:
 
 private slots:
     void onNewNote();
-    void onOpenNote(qint64 id);
     void onVisibilityToggled(qint64 id, bool visible);
     void onDeleteNote(qint64 id);
     void onRestoreNote(qint64 id);
@@ -47,6 +48,7 @@ private slots:
     void onSettingsChanged();
     void onBackupRestored();
     void onQuitRequested();
+    void relayoutNotesOnScreens();
 
 private:
     NoteWindow *ensureWindow(const Note &note);
@@ -57,9 +59,11 @@ private:
     void updateTrayVisibility();
     bool closeToTrayEnabled() const;
     QPoint cascadePosition() const;
+    void connectScreen(QScreen *screen);
 
     HubWindow *m_hub = nullptr;
     QLocalServer *m_server = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
+    QTimer *m_screenTimer = nullptr;
     QHash<qint64, NoteWindow *> m_windows;
 };

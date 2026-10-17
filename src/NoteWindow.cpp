@@ -18,20 +18,29 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
+#include <QImage>
+#include <QImageReader>
+#include <QBuffer>
 #include <QIcon>
 #include <QApplication>
 #include <QScreen>
+#include <QMimeData>
+#include <QUrl>
 #include <QMouseEvent>
 #include <QResizeEvent>
 #include <QFocusEvent>
 #include <QTextListFormat>
 #include <QTextList>
 #include <QTextBlock>
+#include <QTextFragment>
 #include <QContextMenuEvent>
 #include <QTextCharFormat>
+#include <QTextImageFormat>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QDebug>
+
+#include <functional>
 
 namespace {
 
@@ -52,6 +61,10 @@ constexpr int kShadowMargin = 8;
 // view and the text touches the bottom border.
 constexpr int kBodyPadding = 10;
 constexpr qreal kListIndentWidth = 25; //Default QTextListFormat indent.
+// Longest side of a pasted image, in device pixels. The image lives inside the
+// note content as a base64 data URL (so it travels with the backups), hence it
+// is shrunk to something reasonable instead of being stored verbatim.
+constexpr int kMaxImageSide = 900;
 
 QIcon colorIcon(const QString &hex)
 {
@@ -71,6 +84,94 @@ QString themeColor(const QString &id, const QString &fallback)
     const Theme t = Storage::instance().theme(id);
     return t.isValid() ? t.body : fallback;
 }
+
+/// Pixel size of the image referenced by \a name, read from the image header
+/// only (no full decode). QTextDocument already knows how to fetch the payload
+/// of a "data:" URL (and of a local file), so its resource is asked first: a
+/// null size means "unknown", and the caller then leaves the image natural.
+QSize imagePixelSize(QTextDocument *doc, const QString &name)
+{
+    const QVariant data = doc->resource(QTextDocument::ImageResource, QUrl(name));
+    if (data.userType() == QMetaType::QImage)
+        return data.value<QImage>().size();
+    if (data.userType() == QMetaType::QPixmap)
+        return data.value<QPixmap>().toImage().size();
+
+    QByteArray raw = data.toByteArray();
+    if (raw.isEmpty())
+        return QSize();
+    QBuffer buffer(&raw);
+    buffer.open(QIODevice::ReadOnly);
+    return QImageReader(&buffer).size();
+}
+
+/// QTextEdit that turns a pasted/dropped image into a note image: the handler
+/// installed by NoteWindow stores it inside the document (see
+/// NoteWindow::insertImage()). Everything else keeps the QTextEdit behaviour
+/// (plain text, HTML, file links).
+///
+/// Ctrl+V, Shift+Insert, the "Paste" entry of the context menu and drag & drop
+/// all funnel through insertFromMimeData(): QTextEdit::paste() goes to an
+/// internal QWidgetTextControl that calls the widget's virtual override.
+class NoteBodyEdit : public QTextEdit
+{
+public:
+    explicit NoteBodyEdit(QWidget *parent = nullptr) : QTextEdit(parent) {}
+
+    void setImageHandler(std::function<bool(const QImage &)> handler)
+    {
+        m_imageHandler = std::move(handler);
+    }
+
+protected:
+    bool canInsertFromMimeData(const QMimeData *source) const override
+    {
+        if (source && (source->hasImage() || source->hasUrls()))
+            return true;
+        return QTextEdit::canInsertFromMimeData(source);
+    }
+
+    void insertFromMimeData(const QMimeData *source) override
+    {
+        if (source && m_imageHandler) {
+            // An image on the clipboard (a screenshot, or a copy from any
+            // application).
+            const QImage clipboardImage = imageFromMimeData(source);
+            if (!clipboardImage.isNull() && m_imageHandler(clipboardImage))
+                return;
+
+            // Otherwise: image files (a copy or a drag from the file manager).
+            bool inserted = false;
+            for (const QUrl &url : source->urls()) {
+                if (!url.isLocalFile())
+                    continue;
+                const QImage fileImage(url.toLocalFile());
+                if (!fileImage.isNull() && m_imageHandler(fileImage))
+                    inserted = true;
+            }
+            if (inserted)
+                return;
+        }
+        QTextEdit::insertFromMimeData(source);
+    }
+
+private:
+    /// The image carried by the MIME data as image data (a screenshot, a copy
+    /// from another application), or a null image.
+    static QImage imageFromMimeData(const QMimeData *source)
+    {
+        if (!source || !source->hasImage())
+            return QImage();
+        const QVariant data = source->imageData();
+        if (data.userType() == QMetaType::QImage)
+            return data.value<QImage>();
+        if (data.userType() == QMetaType::QPixmap)
+            return data.value<QPixmap>().toImage();
+        return qvariant_cast<QImage>(data);
+    }
+
+    std::function<bool(const QImage &)> m_imageHandler;
+};
 
 } // namespace
 
@@ -134,7 +235,9 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     bar->addWidget(m_closeButton);
 
     // ---- body ----
-    m_body = new QTextEdit(this);
+    auto *noteBody = new NoteBodyEdit(this);
+    m_body = noteBody;
+    noteBody->setImageHandler([this](const QImage &image) { return insertImage(image); });
     m_body->setObjectName(QStringLiteral("body"));
     m_body->setFrameShape(QFrame::NoFrame);
     m_body->setAcceptRichText(true);
@@ -188,6 +291,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     // content
     m_loading = true;
     m_body->document()->setMarkdown(m_note.content);
+    applyImageSizing();   // Markdown carries no image size: refit to the note width
     m_body->document()->clearUndoRedoStacks();
     m_loading = false;
 
@@ -273,14 +377,100 @@ void NoteWindow::applySize()
 
 void NoteWindow::clampToScreen()
 {
-    QRect area;
-    for (const QScreen *s : QGuiApplication::screens())
-        area = area.united(s->availableGeometry());
-    if (area.isEmpty())
+    placeOnScreens(false);
+}
+
+void NoteWindow::ensureOnScreen()
+{
+    placeOnScreens(true);
+}
+
+void NoteWindow::placeOnScreens(bool proportional)
+{
+    // Ignore the transient placeholder screen QtWayland creates while the real
+    // outputs are reconfigured (it has an empty geometry). Mapping onto it would
+    // send every note to (0,0).
+    QList<QScreen *> screens;
+    for (QScreen *s : QGuiApplication::screens())
+        if (!s->availableGeometry().isEmpty())
+            screens.append(s);
+    QScreen *primary = QGuiApplication::primaryScreen();
+    if (primary && primary->availableGeometry().isEmpty())
+        primary = nullptr;
+    if (screens.isEmpty())
         return;
-    const int keep = 60;   // how many pixels of the note always stay reachable
-    m_note.x = qBound(area.left() - m_note.w + keep, m_note.x, area.right() - keep);
-    m_note.y = qBound(area.top(), m_note.y, area.bottom() - keep);
+    if (!primary)
+        primary = screens.first();
+
+    // The rect the note actually occupies: a collapsed note is only as tall as
+    // its title bar, but the width is unchanged.
+    const int h = m_collapsed ? kTitleHeight : m_note.h;
+    const QRect note(m_note.x, m_note.y, m_note.w, h);
+
+    // The screen showing the largest part of the note. Using the intersection
+    // (and not the bounding box of every screen) skips the gaps of non-adjacent
+    // monitor layouts, where no screen actually exists.
+    QScreen *target = primary;
+    int bestArea = 0;
+    for (QScreen *s : screens) {
+        const QRect inter = s->availableGeometry().intersected(note);
+        const int area = inter.width() * inter.height();
+        if (area > bestArea) {
+            bestArea = area;
+            target = s;
+        }
+    }
+
+    // When the note ends up on a different screen (its old one is gone, or the
+    // geometry changed) keep the same relative position and map it onto the new
+    // screen, so the note stays visible and proportionally placed.
+    const QRect area = target->availableGeometry();
+    if (proportional && !m_screenRect.isEmpty() && m_screenRect != area) {
+        // Normalise over the *usable* range (screen minus the note size), so the
+        // mapping is symmetric: moving to another screen and back returns to the
+        // original position instead of drifting a little every time.
+        const int spanX = m_screenRect.width() - m_note.w;
+        const int spanY = m_screenRect.height() - h;
+        const qreal fx = spanX > 0
+                             ? qBound(0.0, qreal(m_note.x - m_screenRect.left()) / spanX, 1.0)
+                             : 0.0;
+        const qreal fy = spanY > 0
+                             ? qBound(0.0, qreal(m_note.y - m_screenRect.top()) / spanY, 1.0)
+                             : 0.0;
+        m_note.x = area.left() + qRound(fx * qMax(0, area.width() - m_note.w));
+        m_note.y = area.top() + qRound(fy * qMax(0, area.height() - h));
+    }
+
+    if (proportional) {
+        // Guarantee the whole note is reachable again (its left/top part when
+        // the note is wider/taller than the screen).
+        m_note.x = qBound(area.left(), m_note.x, area.left() + qMax(0, area.width() - m_note.w));
+        m_note.y = qBound(area.top(), m_note.y, area.top() + qMax(0, area.height() - h));
+    } else {
+        const int keep = 60;   // how many pixels of the note always stay reachable
+        m_note.x = qBound(area.left() - m_note.w + keep, m_note.x, area.right() - keep);
+        m_note.y = qBound(area.top(), m_note.y, area.bottom() - keep);
+    }
+
+    const bool moved = (m_note.x != note.x() || m_note.y != note.y());
+    m_screenRect = area;   // the screen the note now lives on
+
+    // If the compositor dismissed the surface when its output went away, or the
+    // QWindow still points at a screen that is no longer connected, re-map it on
+    // a live screen (hide + show recreates the layer surface).
+    QWindow *wh = windowHandle();
+    const bool staleScreen = wh && wh->screen() && !screens.contains(wh->screen());
+    const bool remap = proportional && m_note.visible && (!isVisible() || staleScreen);
+    if (remap) {
+        hide();
+        show();
+    }
+
+    if (moved || remap)
+        applyMargins();
+
+    if (moved)
+        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h);
 }
 
 void NoteWindow::applyLayer(const QString &layer)
@@ -360,12 +550,18 @@ void NoteWindow::setVisibleState(bool visible)
         m_raisedForFocus = false;
         applyEffectiveLayer();
         persistScroll();
+        setVisible(false);
+        return;
     }
-    setVisible(visible);
+    setVisible(true);
+    // A note restored from the hub may still hold a position on a screen that is
+    // no longer connected: bring it back before showing it.
+    ensureOnScreen();
 }
 
 void NoteWindow::activate()
 {
+    ensureOnScreen();
     show();
     raise();
     if (m_layer)
@@ -493,6 +689,81 @@ void NoteWindow::commitTitleEdit()
 void NoteWindow::scheduleSaveContent()
 {
     m_saveTimer->start();
+}
+
+// --------------------------------------------------------------- images
+
+bool NoteWindow::insertImage(const QImage &sourceImage)
+{
+    if (sourceImage.isNull())
+        return false;
+
+    // The image is embedded in the note content as a data URL (no file, no
+    // path: it is saved with the note and travels with the JSON backups). It is
+    // stored at its original size, capped to kMaxImageSide: the note width is
+    // NOT baked in, so the body shows it as wide as the note and widening the
+    // note really enlarges the image, up to its stored resolution (see
+    // applyImageSizing()).
+    const QSize limit(kMaxImageSide, kMaxImageSide);
+    QImage image = sourceImage;
+    if (image.width() > limit.width() || image.height() > limit.height())
+        image = image.scaled(limit, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    if (!image.save(&buffer, "PNG")) {
+        qWarning() << "[nota] image not encoded";
+        return false;
+    }
+
+    QTextImageFormat fmt;
+    fmt.setName(QStringLiteral("data:image/png;base64,") + QString::fromLatin1(png.toBase64()));
+    fmt.setProperty(QTextFormat::ImageAltText, QStringLiteral("image"));
+    // One image pixel is drawn as one device pixel, so the image is sharp on
+    // scaled displays; QTextImageHandler then keeps it within the note width
+    // and grows it back when the note is widened, up to that size.
+    const qreal dpr = qMax(1.0, m_body->devicePixelRatioF());
+    fmt.setWidth(qMax(1.0, image.width() / dpr));
+    fmt.setMaximumWidth(QTextLength(QTextLength::PercentageLength, 100));
+    m_body->textCursor().insertImage(fmt);   // replaces the selection
+    return true;
+}
+
+void NoteWindow::applyImageSizing()
+{
+    QTextDocument *doc = m_body->document();
+
+    // The image positions are collected first: merging a char format can split
+    // or merge fragments and would invalidate the iterators.
+    QList<QPair<int, int>> images;   // (position, length)
+    for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment fragment = it.fragment();
+            if (fragment.isValid() && fragment.charFormat().isImageFormat())
+                images.append({fragment.position(), fragment.length()});
+        }
+    }
+    if (images.isEmpty())
+        return;
+
+    QTextCursor c(doc);
+    c.beginEditBlock();
+    const qreal dpr = qMax(1.0, m_body->devicePixelRatioF());
+    for (const QPair<int, int> &range : images) {
+        c.setPosition(range.first);
+        c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
+        QTextImageFormat fmt = c.charFormat().toImageFormat();
+        // Markdown carries no image size: restore the "one image pixel = one
+        // device pixel" width (1:1, sharp on scaled displays) plus the note
+        // width limit.
+        const QSize px = imagePixelSize(doc, fmt.name());
+        if (px.isValid())
+            fmt.setWidth(qMax(1.0, px.width() / dpr));
+        fmt.setMaximumWidth(QTextLength(QTextLength::PercentageLength, 100));
+        c.mergeCharFormat(fmt);
+    }
+    c.endEditBlock();
 }
 
 void NoteWindow::persistScroll()

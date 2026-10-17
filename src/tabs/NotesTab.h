@@ -6,7 +6,7 @@ class QGridLayout;
 class QLabel;
 class QPushButton;
 
-/// "Notes" tab: grid of cards with open / show-hide / delete actions.
+/// "Notes" tab: grid of cards with show-hide / delete actions.
 class NotesTab : public QWidget
 {
     Q_OBJECT
@@ -21,7 +21,6 @@ public:
 
 signals:
     void newNoteRequested();
-    void openNoteRequested(qint64 id);
     void noteVisibilityToggled(qint64 id, bool visible);
     void deleteNoteRequested(qint64 id);
     void quitRequested();

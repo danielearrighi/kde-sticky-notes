@@ -5,13 +5,16 @@
 #include "Themes.h"
 #include "UiHelpers.h"
 
+#include <QApplication>
 #include <QFont>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QStyle>
 #include <QVBoxLayout>
 
 NotesTab::NotesTab(QWidget *parent)
@@ -103,18 +106,24 @@ void NotesTab::refresh()
         sn->setAlignment(Qt::AlignTop | Qt::AlignLeft);
 
         auto *buttons = new QHBoxLayout;
-        auto *showBtn = UiHelpers::makeCardButton(I18n::t(QStringLiteral("notes.show")));
         auto *vis = UiHelpers::makeCardButton(n.visible ? I18n::t(QStringLiteral("hide"))
                                                         : I18n::t(QStringLiteral("show")));
-        auto *del = UiHelpers::makeCardButton(I18n::t(QStringLiteral("delete")));
-        buttons->addWidget(showBtn);
-        buttons->addWidget(vis);
+        // Delete is icon-only: the system trash icon (Breeze), with the label as
+        // tooltip; falls back to the text when the style has no icon.
+        auto *del = UiHelpers::makeCardButton(QString());
+        const QIcon trash = QApplication::style()->standardIcon(QStyle::SP_TrashIcon);
+        if (trash.isNull()) {
+            del->setText(I18n::t(QStringLiteral("delete")));
+        } else {
+            del->setIcon(trash);
+            del->setToolTip(I18n::t(QStringLiteral("delete")));
+        }
         buttons->addStretch();
+        buttons->addWidget(vis);
         buttons->addWidget(del);
 
         const qint64 id = n.id;
         const bool visible = n.visible;
-        connect(showBtn, &QPushButton::clicked, this, [this, id] { emit openNoteRequested(id); });
         connect(vis, &QPushButton::clicked, this, [this, id, visible] {
             emit noteVisibilityToggled(id, !visible);
         });

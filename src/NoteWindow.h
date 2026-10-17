@@ -8,6 +8,7 @@
 
 namespace LayerShellQt { class Window; }
 
+class QImage;
 class QLabel;
 class QLineEdit;
 class QTextEdit;
@@ -37,6 +38,11 @@ public:
 
     /// Brings the note back into focus and to the front.
     void activate();
+
+    /// Pulls the note back onto a connected screen when its saved position falls
+    /// outside every current screen (e.g. the monitor it lived on was unplugged)
+    /// and persists the new geometry. A no-op when the position is already fine.
+    void ensureOnScreen();
 
     /// Persists the current body scroll position (emits scrollEdited). Called
     /// when the note is hidden or the app quits: the position is not tracked
@@ -73,12 +79,30 @@ private:
     void applyMargins();
     void applySize();
     void clampToScreen();
+
+    /// Places the note on a connected screen and updates m_screenRect.
+    /// With \a proportional (a screen topology change) a note that no longer
+    /// overlaps any screen keeps its relative position and is mapped onto the
+    /// primary screen, fully visible; otherwise it is clamped into the screen it
+    /// already lives on (allowing the usual sliver overhang used while dragging).
+    void placeOnScreens(bool proportional);
     void applyStyle();
     void refreshTitleLabel();
     void beginTitleEdit();
     void commitTitleEdit();
     void scheduleSaveContent();
     void buildContextMenu(const QPoint &globalPos);
+
+    /// Inserts \a image at the cursor as a PNG data URL (see the note about
+    /// pasted images in NoteWindow.cpp). Returns false when the image is empty
+    /// or cannot be encoded.
+    bool insertImage(const QImage &image);
+
+    /// Restores the display size of every image of the body: one image pixel
+    /// drawn as one device pixel (sharp on scaled displays) and never wider
+    /// than the note. Markdown carries no image size, so this runs after
+    /// setMarkdown() (and is harmless on a document without images).
+    void applyImageSizing();
 
     /// Re-applies the saved scroll position once the layout is ready. A no-op
     /// while the note is collapsed (the body is hidden and its scrollbar range
@@ -131,4 +155,8 @@ private:
     QPoint m_resizeRefLocal;
     QSize m_resizeStartSize;
     bool m_loading = false;
+
+    /// Available geometry of the screen the note was last placed on. Used to
+    /// keep the relative position when that screen disappears.
+    QRect m_screenRect;
 };

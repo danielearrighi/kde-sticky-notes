@@ -30,7 +30,6 @@ HubWindow::HubWindow(QWidget *parent)
     // The hub exposes the same public interface as before (signals + refresh):
     // it forwards the tabs' ones, which stay independent from each other.
     connect(m_notes, &NotesTab::newNoteRequested, this, &HubWindow::newNoteRequested);
-    connect(m_notes, &NotesTab::openNoteRequested, this, &HubWindow::openNoteRequested);
     connect(m_notes, &NotesTab::noteVisibilityToggled, this, &HubWindow::noteVisibilityToggled);
     connect(m_notes, &NotesTab::deleteNoteRequested, this, &HubWindow::deleteNoteRequested);
     connect(m_notes, &NotesTab::quitRequested, this, &HubWindow::quitRequested);

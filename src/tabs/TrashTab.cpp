@@ -114,7 +114,9 @@ void TrashTab::refresh()
         m_table->setItem(row, 0, titleItem);
 
         auto *contentItem = new QTableWidgetItem(UiHelpers::plainSnippet(n.content, 120));
-        contentItem->setToolTip(n.content);
+        // The note Markdown can embed an image as a data URL: the tooltip shows
+        // the plain text only, never the base64 payload.
+        contentItem->setToolTip(UiHelpers::plainSnippet(n.content, 400));
         m_table->setItem(row, 1, contentItem);
 
         m_table->setItem(row, 2, new QTableWidgetItem(UiHelpers::formatWhen(n.createdAt)));

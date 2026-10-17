@@ -22,7 +22,6 @@ public:
 
 signals:
     void newNoteRequested();
-    void openNoteRequested(qint64 id);
     void noteVisibilityToggled(qint64 id, bool visible);
     void deleteNoteRequested(qint64 id);
     void restoreNoteRequested(qint64 id);

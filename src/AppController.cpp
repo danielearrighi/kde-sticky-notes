@@ -24,6 +24,7 @@
 #include <QRandomGenerator>
 #include <QScreen>
 #include <QSystemTrayIcon>
+#include <QTimer>
 #include <QDateTime>
 #include <QDebug>
 
@@ -93,7 +94,6 @@ void AppController::start(bool startHidden)
 {
     m_hub = new HubWindow;
     connect(m_hub, &HubWindow::newNoteRequested, this, &AppController::onNewNote);
-    connect(m_hub, &HubWindow::openNoteRequested, this, &AppController::onOpenNote);
     connect(m_hub, &HubWindow::noteVisibilityToggled, this, &AppController::onVisibilityToggled);
     connect(m_hub, &HubWindow::deleteNoteRequested, this, &AppController::onDeleteNote);
     connect(m_hub, &HubWindow::restoreNoteRequested, this, &AppController::onRestoreNote);
@@ -105,6 +105,24 @@ void AppController::start(bool startHidden)
 
     setupTray();
     updateTrayVisibility();
+
+    // Follow the screen topology: when a monitor is unplugged (or its geometry
+    // changes) the notes that lived on it must be pulled back onto the
+    // remaining screens, otherwise their saved coordinates stay off-screen and
+    // they vanish until a restart. The relayout is deferred to the next event
+    // loop turn so every screen update has settled (the new primary included).
+    m_screenTimer = new QTimer(this);
+    m_screenTimer->setSingleShot(true);
+    m_screenTimer->setInterval(0);
+    connect(m_screenTimer, &QTimer::timeout, this, &AppController::relayoutNotesOnScreens);
+    connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen *s) {
+        connectScreen(s);
+        m_screenTimer->start();
+    });
+    connect(qApp, &QGuiApplication::screenRemoved, this, [this] { m_screenTimer->start(); });
+    connect(qApp, &QGuiApplication::primaryScreenChanged, this, [this] { m_screenTimer->start(); });
+    for (QScreen *s : QGuiApplication::screens())
+        connectScreen(s);
 
     // The scroll position is not tracked incrementally: flush it for every
     // open note right before the app exits.
@@ -214,6 +232,18 @@ QPoint AppController::cascadePosition() const
     return QPoint(x, y);
 }
 
+void AppController::connectScreen(QScreen *screen)
+{
+    connect(screen, &QScreen::geometryChanged, this, [this] { m_screenTimer->start(); });
+    connect(screen, &QScreen::availableGeometryChanged, this, [this] { m_screenTimer->start(); });
+}
+
+void AppController::relayoutNotesOnScreens()
+{
+    for (NoteWindow *w : std::as_const(m_windows))
+        w->ensureOnScreen();
+}
+
 void AppController::createNewNote()
 {
     Note n;
@@ -260,28 +290,16 @@ void AppController::onNewNote()
     createNewNote();
 }
 
-void AppController::onOpenNote(qint64 id)
-{
-    const Note n = Storage::instance().note(id);
-    if (!n.id || n.deleted)
-        return;
-    if (!n.visible) {
-        Storage::instance().setVisible(id, true);
-        Note shown = Storage::instance().note(id);
-        ensureWindow(shown)->activate();
-        if (m_hub)
-            m_hub->refresh();
-        return;
-    }
-    ensureWindow(n)->activate();
-}
-
 void AppController::onVisibilityToggled(qint64 id, bool visible)
 {
     Storage::instance().setVisible(id, visible);
     if (visible) {
         Note n = Storage::instance().note(id);
-        ensureWindow(n)->activate();
+        NoteWindow *w = ensureWindow(n);
+        // Keep the window's own visible flag in sync (ensureWindow only shows an
+        // existing one) and bring it back on screen if needed.
+        w->setVisibleState(true);
+        w->activate();
     } else if (NoteWindow *w = m_windows.value(id)) {
         w->setVisibleState(false);
     }

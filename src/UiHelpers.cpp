@@ -21,6 +21,10 @@ QString untitled()
 QString plainSnippet(const QString &markdown, int maxLen)
 {
     QString s = markdown;
+    // Images are embedded as data URLs (see NoteWindow::insertImage()): drop
+    // them before the cleanup below, otherwise the preview would show the
+    // base64 payload.
+    s.remove(QRegularExpression(QStringLiteral("!\\[[^\\]]*\\]\\([^)]*\\)")));
     s.remove(QRegularExpression(QStringLiteral("[#*_>`~\\[\\]()!-]")));
     s.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
     s = s.trimmed();
