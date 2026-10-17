@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
-# Build a Sticky Notes release folder (the "recommended" release).
+# Build a Sticky Notes release tarball (the "recommended" release).
 #
-# Produces release/sticky-notes-<version>-<arch>/ containing the executable, the
-# .desktop entry, the application icon, an install.sh for end users and a
-# README.md with the runtime requirements. Unlike the AppImage
+# Produces release/sticky-notes-<version>-<arch>.tar.gz containing the
+# executable, the .desktop entry, the application icon, an install.sh for end
+# users and a README.md with the runtime requirements. The intermediate folder
+# is removed once the archive is created. Unlike the AppImage
 # (scripts/build_appimage.sh) this bundle does NOT ship the Qt6/LayerShellQt
 # libraries: the target machine must already have them, so it only runs on a
-# KDE Plasma (Wayland) that also has the runtime packages. Pass --tarball to also
-# create a .tar.gz ready to attach to a release.
+# KDE Plasma (Wayland) that also has the runtime packages.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
 root="$(cd "$here/.." && pwd)"                                 # repository root
 
 skip_build=0
-make_tarball=0
 clean_only=0
 
 usage() {
@@ -23,7 +22,6 @@ Usage: scripts/build_release.sh [options]
 
 Options:
   --skip-build   reuse the existing build/sticky-notes (do not run CMake)
-  --tarball      also create release/sticky-notes-<version>-<arch>.tar.gz
   --clean        remove release/, then exit
   -h, --help     show this help
 EOF
@@ -32,7 +30,6 @@ EOF
 while (($#)); do
     case "$1" in
         --skip-build) skip_build=1 ;;
-        --tarball)    make_tarball=1 ;;
         --clean)      clean_only=1 ;;
         -h|--help)    usage; exit 0 ;;
         *)            echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
@@ -88,7 +85,7 @@ fi
 log "Version: $version"
 log "Architecture: $arch"
 
-# --- 2. Release folder -----------------------------------------------------
+# --- 2. Staging folder -----------------------------------------------------
 
 name="sticky-notes-$version-$arch"
 stage="$release_dir/$name"
@@ -207,19 +204,17 @@ Sticky Notes is licensed under the **GNU General Public License v3.0 or later**
 (LGPL-2.1-or-later), SQLite (public domain).
 EOF
 
-# --- 4. Optional tarball ---------------------------------------------------
+# --- 4. Tarball ------------------------------------------------------------
 
-if ((make_tarball)); then
-    tarball="$release_dir/$name.tar.gz"
-    log "Creating $tarball"
-    rm -f "$tarball"
-    tar -C "$release_dir" -czf "$tarball" "$name"
-fi
+tarball="$release_dir/$name.tar.gz"
+log "Creating $tarball"
+rm -f "$tarball"
+tar -C "$release_dir" -czf "$tarball" "$name"
+
+# The per-file folder was only a staging area: drop it so release/ holds the
+# archive alone.
+rm -rf "$stage"
 
 # --- 5. Summary ------------------------------------------------------------
 
-log "Done: $stage"
-ls -1 "$stage" | sed 's/^/  /'
-if ((make_tarball)); then
-    log "Archive: $tarball ($(du -h "$tarball" | cut -f1))"
-fi
+log "Done: $tarball ($(du -h "$tarball" | cut -f1))"
