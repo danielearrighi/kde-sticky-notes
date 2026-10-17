@@ -1,12 +1,34 @@
 # Sticky Notes
 
 Desktop sticky notes for **KDE Plasma (Wayland)**.
+![Sticky Notes: colored notes on the desktop and the hub with the note grid](screens/splash.png)
 
-![Sticky Notes: colored notes on the desktop and the hub with the note grid](screens/sticky-notes.png)
+## Try it!
 
----
+Download the latest release from the [Releases page](https://github.com/danielearrighi/kde-sticky-notes/releases).
+There are two ways to try it.
 
-## Try it out
+**AppImage** (self-contained, bundles Qt6 and LayerShellQt — nothing to build):
+download `sticky-notes-<version>-x86_64.AppImage`, make it executable and run it:
+
+```bash
+chmod +x sticky-notes-<version>-x86_64.AppImage
+./sticky-notes-<version>-x86_64.AppImage
+```
+or 
+
+**tar.gz** (plain binary release — installs it in your session, so it shows up
+in the KDE menu and the taskbar): download `sticky-notes-<version>-x86_64.tar.gz`, extract it and run the bundled installer:
+
+```bash
+tar -xzf sticky-notes-<version>-x86_64.tar.gz
+cd sticky-notes-<version>-x86_64
+./install.sh
+```
+
+The installer checks the runtime libraries, offers to install the missing ones with your package manager and copies the app into `~/.local`. Run it with `--help` for the options, and run `sticky-notes` (or the KDE menu entry) afterwards to start it.
+
+## Build
 
 You need a **KDE Plasma (Wayland)** session with layer-shell support (KWin since
 Plasma 6.6) and the Qt6 + LayerShellQt development packages.
@@ -51,6 +73,8 @@ rm -f ~/.local/bin/sticky-notes \
 
 ## What you can do
 
+![Sticky Notes: Settings window](screens/notes.png)
+
 - **Move and resize notes** — drag from the title bar, resize from the
   bottom-right corner.
 - **Markdown content** — write freely and format it (bold, italic, underline,
@@ -67,7 +91,7 @@ rm -f ~/.local/bin/sticky-notes \
 - **Single instance** — launching the app again just brings the hub to the front.
 - **Languages** — Multilanguage (only English, Italian for now)
 
-![Sticky Notes: Settings window](screens/settings-window.png)
+![Sticky Notes: Settings window](screens/settings.png)
 
 ---
 

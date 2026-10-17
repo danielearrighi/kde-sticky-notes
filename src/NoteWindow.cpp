@@ -400,8 +400,18 @@ void NoteWindow::applyMargins()
         // LayerShellQt::setMargins() does NOT commit and during a drag the
         // widget does not redraw, so the window does not move until something
         // else (e.g. a click) triggers a redraw that commits it.
-        // We force a redraw to apply the new margin right away.
-        update();
+        //
+        // We only dirty a corner of the transparent shadow border, not the
+        // whole note: this is enough for QtWayland to render and commit the
+        // surface. A full update() would repaint the body too, and with an
+        // image inside it that repaint costs far more than a frame. The
+        // surface would then lag several pointer events behind: the local
+        // coordinate keeps growing from the press point and the fixed
+        // reference in mouseMoveEvent() sums the delta again on every event,
+        // making the note jump around (the same "explosion" as when nothing
+        // commits at all). Moving does not change the note content, so a
+        // minimal damage is enough — the compositor moves the existing buffer.
+        update(QRect(0, 0, kShadowMargin, kShadowMargin));
     }
 }
 

@@ -331,6 +331,15 @@ void AppController::onDeleteNote(qint64 id)
 void AppController::onRestoreNote(qint64 id)
 {
     Storage::instance().restore(id);
+
+    // Deleting a note also closed its window (onDeleteNote -> removeWindow), and
+    // Storage::restore() only flips the row back: without reopening it the note
+    // shows up in the hub (with its "Hide" button, i.e. visible=1) but never
+    // reappears on screen. Recreate the window for the notes that were visible.
+    const Note n = Storage::instance().note(id);
+    if (n.id && !n.deleted && n.visible)
+        ensureWindow(n)->setVisibleState(true);
+
     if (m_hub)
         m_hub->refresh();
 }

@@ -74,10 +74,12 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   Use/keep this helper for text columns.
 - Layer-shell state (including margins) is double-buffered and
   `LayerShellQt::Window::setMargins()` does **not** commit. `NoteWindow::applyMargins()`
-  calls `update()` to force a `wl_surface` commit. Remove that and drag positions
-  explode. Drag math must use the **local** coordinate incrementally with a fixed
-  press reference (see `NoteWindow::mouseMoveEvent()`), never `globalPosition()`
-  as an absolute base.
+  forces a `wl_surface` commit by dirtying a corner of the shadow border only
+  (`update(QRect(...))`, **not** a full `update()`). Remove that and drag positions
+  explode; make it a full repaint and a note holding an image explodes instead
+  (the slow body repaint makes the surface lag the pointer). Drag math must use
+  the **local** coordinate incrementally with a fixed press reference (see
+  `NoteWindow::mouseMoveEvent()`), never `globalPosition()` as an absolute base.
 - Do not reference /docs files since they are not committed to the repository.
 
 ## Notes for agents (context budget)
