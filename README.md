@@ -133,8 +133,6 @@ rebuild.
 
 - **KDE/Wayland only** with layer-shell support; GNOME and X11 sessions are not
   supported.
-- **Multi-monitor**: notes are anchored to the top-left edge of the screen chosen
-  by the compositor; moving between monitors is not handled yet.
 - **Order (z-order)** among notes of the same layer is not controllable by the
   client.
 
