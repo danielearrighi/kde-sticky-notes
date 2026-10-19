@@ -36,6 +36,7 @@
   "note.minimize": "Minimize",
   "note.delete": "Delete note",
   "note.color": "Note color",
+  "note.opacity": "Opacity",
   "note.always_on_top": "Always on top",
   "note.duplicate": "Duplicate",
   "note.hide": "Hide note",

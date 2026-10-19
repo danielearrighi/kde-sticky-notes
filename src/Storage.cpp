@@ -89,6 +89,7 @@ void Storage::ensureSchema()
         " visible INTEGER NOT NULL DEFAULT 1,"
         " collapsed INTEGER NOT NULL DEFAULT 0,"
         " scroll INTEGER NOT NULL DEFAULT 0,"
+        " opacity INTEGER NOT NULL DEFAULT 100,"
         " deleted INTEGER NOT NULL DEFAULT 0,"
         " created_at TEXT, updated_at TEXT, deleted_at TEXT)"));
 
@@ -131,6 +132,8 @@ void Storage::ensureSchema()
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0"));
     if (!cols.contains(QStringLiteral("scroll")))
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN scroll INTEGER NOT NULL DEFAULT 0"));
+    if (!cols.contains(QStringLiteral("opacity")))
+        q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN opacity INTEGER NOT NULL DEFAULT 100"));
     if (!cols.contains(QStringLiteral("last_screen_key")))
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN last_screen_key TEXT NOT NULL DEFAULT ''"));
 }
@@ -153,16 +156,17 @@ Note noteFromQuery(const QSqlQuery &q)
     n.visible = q.value(9).toInt() != 0;
     n.collapsed = q.value(10).toInt() != 0;
     n.scroll = q.value(11).toInt();
-    n.deleted = q.value(12).toInt() != 0;
-    n.createdAt = q.value(13).toString();
-    n.updatedAt = q.value(14).toString();
-    n.deletedAt = q.value(15).toString();
-    n.lastScreenKey = q.value(16).toString();
+    n.opacity = qBound(10, q.value(12).toInt(), 100);
+    n.deleted = q.value(13).toInt() != 0;
+    n.createdAt = q.value(14).toString();
+    n.updatedAt = q.value(15).toString();
+    n.deletedAt = q.value(16).toString();
+    n.lastScreenKey = q.value(17).toString();
     return n;
 }
 
 const char *kNoteCols =
-    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,created_at,updated_at,deleted_at,last_screen_key";
+    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,deleted,created_at,updated_at,deleted_at,last_screen_key";
 } // namespace
 
 QList<Note> Storage::notes(bool includeDeleted) const
@@ -196,8 +200,8 @@ qint64 Storage::insertNote(Note n)
     const QString now = nowIso();
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,deleted,last_screen_key,created_at,updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)"));
+        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,deleted,last_screen_key,created_at,updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)"));
     q.addBindValue(bindText(n.title));
     q.addBindValue(bindText(n.content));
     q.addBindValue(bindText(n.themeId));
@@ -209,6 +213,7 @@ qint64 Storage::insertNote(Note n)
     q.addBindValue(n.visible ? 1 : 0);
     q.addBindValue(n.collapsed ? 1 : 0);
     q.addBindValue(n.scroll);
+    q.addBindValue(qBound(10, n.opacity, 100));
     q.addBindValue(bindText(n.lastScreenKey));
     q.addBindValue(now);
     q.addBindValue(now);
@@ -223,7 +228,7 @@ void Storage::updateNote(const Note &n)
 {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "UPDATE notes SET title=?,content=?,theme=?,x=?,y=?,w=?,h=?,layer=?,visible=?,collapsed=?,scroll=?,updated_at=?"
+        "UPDATE notes SET title=?,content=?,theme=?,x=?,y=?,w=?,h=?,layer=?,visible=?,collapsed=?,scroll=?,opacity=?,updated_at=?"
         " WHERE id=?"));
     q.addBindValue(bindText(n.title));
     q.addBindValue(bindText(n.content));
@@ -236,6 +241,7 @@ void Storage::updateNote(const Note &n)
     q.addBindValue(n.visible ? 1 : 0);
     q.addBindValue(n.collapsed ? 1 : 0);
     q.addBindValue(n.scroll);
+    q.addBindValue(qBound(10, n.opacity, 100));
     q.addBindValue(nowIso());
     q.addBindValue(n.id);
     q.exec();
@@ -352,6 +358,15 @@ void Storage::updateScroll(qint64 id, int scroll)
     QSqlQuery q(db());
     q.prepare(QStringLiteral("UPDATE notes SET scroll=? WHERE id=?"));
     q.addBindValue(qMax(0, scroll));
+    q.addBindValue(id);
+    q.exec();
+}
+
+void Storage::updateOpacity(qint64 id, int opacity)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE notes SET opacity=? WHERE id=?"));
+    q.addBindValue(qBound(10, opacity, 100));
     q.addBindValue(id);
     q.exec();
 }
@@ -514,6 +529,7 @@ QJsonObject noteToJson(const Note &n, const QList<QPair<QString, QRect>> &positi
     o[QStringLiteral("visible")] = n.visible;
     o[QStringLiteral("collapsed")] = n.collapsed;
     o[QStringLiteral("scroll")] = n.scroll;
+    o[QStringLiteral("opacity")] = n.opacity;
     o[QStringLiteral("deleted")] = n.deleted;
     o[QStringLiteral("created_at")] = n.createdAt;
     o[QStringLiteral("updated_at")] = n.updatedAt;
@@ -632,8 +648,8 @@ bool Storage::importBackup(const QString &path, bool replaceExisting, QString *e
 
     QSqlQuery ins(database);
     ins.prepare(QStringLiteral(
-        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,"
-        "deleted,last_screen_key,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,"
+        "deleted,last_screen_key,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
     QSqlQuery posIns(database);
     posIns.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO note_positions (note_id,screen_key,x,y,w,h) VALUES (?,?,?,?,?,?)"));
@@ -653,6 +669,7 @@ bool Storage::importBackup(const QString &path, bool replaceExisting, QString *e
         ins.addBindValue(o.value(QStringLiteral("visible")).toBool(true) ? 1 : 0);
         ins.addBindValue(o.value(QStringLiteral("collapsed")).toBool(false) ? 1 : 0);
         ins.addBindValue(o.value(QStringLiteral("scroll")).toInt());
+        ins.addBindValue(qBound(10, o.value(QStringLiteral("opacity")).toInt(100), 100));
         ins.addBindValue(o.value(QStringLiteral("deleted")).toBool(false) ? 1 : 0);
         ins.addBindValue(bindText(o.value(QStringLiteral("last_screen_key")).toString()));
         ins.addBindValue(created.isEmpty() ? now : created);

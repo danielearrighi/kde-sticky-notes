@@ -16,6 +16,7 @@ struct Note
     bool visible = true;
     bool collapsed = false;   // collapsed to the title bar only
     int scroll = 0;           // saved body scroll position (vertical pixels)
+    int opacity = 100;        // window opacity, 10..100 (%)
     bool deleted = false;
     QString createdAt;
     QString updatedAt;

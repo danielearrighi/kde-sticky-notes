@@ -82,6 +82,7 @@ rm -f ~/.local/bin/sticky-notes \
 - **Theming** — pick a color/theme per note, configure a default theme and font,
   and build your own themes with the color picker in the settings.
 - **Always on top or on the desktop** — per note, from the context menu.
+- **Opacity** — fade each note from 100% down to 10%, per note, from the context menu.
 - **Manage notes from the hub** — the taskbar icon opens a grid of notes (open,
   hide, delete, new) plus a **trash** and the **settings**, where you can also
   back up and restore your notes.

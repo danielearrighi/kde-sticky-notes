@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QPainter>
 #include <QPainterPath>
+#include <QGraphicsOpacityEffect>
 #include <QPixmap>
 #include <QImage>
 #include <QImageReader>
@@ -234,6 +235,34 @@ private:
     std::function<void()> m_plainPasteHandler;
 };
 
+/// Container of the note card: it paints the rounded background and the title
+/// strip (see NoteWindow::paintCard()) and is the widget the opacity effect is
+/// applied to, so background, text and images are faded together.
+class NoteCard : public QWidget
+{
+public:
+    explicit NoteCard(QWidget *parent = nullptr) : QWidget(parent) {}
+
+    void setPaintHandler(std::function<void(QPainter &)> handler)
+    {
+        m_paintHandler = std::move(handler);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        if (!m_paintHandler) {
+            QWidget::paintEvent(event);
+            return;
+        }
+        QPainter p(this);
+        m_paintHandler(p);
+    }
+
+private:
+    std::function<void(QPainter &)> m_paintHandler;
+};
+
 } // namespace
 
 NoteWindow::NoteWindow(const Note &note, QWidget *parent)
@@ -251,8 +280,17 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     root->setContentsMargins(kShadowMargin, kShadowMargin, kShadowMargin, kShadowMargin);
     root->setSpacing(0);
 
+    // The card holds the title bar and the body and paints their background;
+    // the opacity effect is applied to it as a whole (see applyOpacity()).
+    auto *card = new NoteCard(this);
+    m_card = card;
+    card->setPaintHandler([this](QPainter &p) { paintCard(p); });
+    auto *cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(0, 0, 0, 0);
+    cardLayout->setSpacing(0);
+
     // ---- title bar ----
-    m_titleBar = new QWidget(this);
+    m_titleBar = new QWidget(card);
     m_titleBar->setObjectName(QStringLiteral("titleBar"));
     m_titleBar->setFixedHeight(kTitleHeight);
     m_titleBar->setAttribute(Qt::WA_StyledBackground, true);
@@ -296,7 +334,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     bar->addWidget(m_closeButton);
 
     // ---- body ----
-    auto *noteBody = new NoteBodyEdit(this);
+    auto *noteBody = new NoteBodyEdit(card);
     m_body = noteBody;
     noteBody->setImageHandler([this](const QImage &image) { return insertImage(image); });
     noteBody->setPlainPasteHandler([this] { pastePlainText(); });
@@ -307,11 +345,12 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_body->document()->setDocumentMargin(kBodyPadding);
     m_body->document()->setIndentWidth(kListIndentWidth);
 
-    root->addWidget(m_titleBar);
-    root->addWidget(m_body, 1);
+    cardLayout->addWidget(m_titleBar);
+    cardLayout->addWidget(m_body, 1);
+    root->addWidget(card);
 
     // ---- resize grip (bottom right) ----
-    m_resizeGrip = new QLabel(QStringLiteral("\u25e2"), this);   // ◢
+    m_resizeGrip = new QLabel(QStringLiteral("\u25e2"), card);   // ◢
     m_resizeGrip->setObjectName(QStringLiteral("resizeGrip"));
     m_resizeGrip->setAlignment(Qt::AlignCenter);
     m_resizeGrip->setFixedSize(kResizeGrip, kResizeGrip);
@@ -359,6 +398,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
 
     refreshTitleLabel();
     applyTheme(m_note.themeId);
+    applyOpacity();
 
     // Saved collapsed state: restore the appearance (applySize() applies the height).
     m_collapsed = m_note.collapsed;
@@ -700,9 +740,9 @@ void NoteWindow::applyStyle()
 
     setStyleSheet(QStringLiteral(
                       // The note background and its title strip are painted by
-                      // hand in paintEvent() (rounded corners + drop shadow):
-                      // here the two containers are just made transparent and
-                      // the widgets drawn on top of them are styled.
+                      // hand in paintCard() (the shadow in paintEvent()): here
+                      // the containers are just made transparent and the
+                      // widgets drawn on top of them are styled.
                       "#noteWindow { background: transparent; }"
                       "#titleBar { background: transparent; }"
                       "#titleText { color: %3; font-weight: bold; }"
@@ -758,8 +798,39 @@ void NoteWindow::applyStyle()
     fmt.setForeground(QColor(m_theme.text));
     m_body->setCurrentCharFormat(fmt);
 
-    // The note background is painted by hand from m_theme (see paintEvent()):
+    // The note background is painted by hand from m_theme (see paintCard()):
     // force a repaint so a theme change is reflected right away.
+    m_card->update();
+}
+
+void NoteWindow::applyOpacity()
+{
+    m_note.opacity = qBound(10, m_note.opacity, 100);
+    const qreal opacity = m_note.opacity / 100.0;
+
+    // QtWayland does not implement QWindow::setOpacity() (Wayland has no
+    // standard surface-opacity protocol), so the translucency is composed
+    // client-side. The effect is applied to the card, not to the window: the
+    // background, the text and the pasted images are composited together and
+    // then faded (a real group opacity), while dragging keeps working because
+    // NoteWindow::applyMargins() only damages the shadow corner and does not
+    // repaint the card (with a top-level effect every partial update would
+    // re-render the whole note, images included).
+    if (opacity >= 1.0) {
+        if (m_card->graphicsEffect())
+            m_card->setGraphicsEffect(nullptr);
+        update();
+        return;
+    }
+    auto *effect = qobject_cast<QGraphicsOpacityEffect *>(m_card->graphicsEffect());
+    if (!effect) {
+        effect = new QGraphicsOpacityEffect(m_card);
+        m_card->setGraphicsEffect(effect);
+    }
+    effect->setOpacity(opacity);
+
+    // The shadow is painted by NoteWindow (outside the card), so its alpha
+    // follows the opacity by hand.
     update();
 }
 
@@ -925,17 +996,30 @@ void NoteWindow::paintEvent(QPaintEvent *event)
     const QRectF card(kShadowMargin, kShadowMargin,
                       width() - 2.0 * kShadowMargin, height() - 2.0 * kShadowMargin);
 
+    // The shadow is painted here, outside the card: the card opacity effect
+    // does not cover it, so its alpha is scaled by hand.
+    const qreal opacity = qBound(10, m_note.opacity, 100) / 100.0;
+
     // Small drop shadow: a few concentric rounded rects whose alpha grows
     // toward the note, so it looks slightly raised above the desktop.
     p.setPen(Qt::NoPen);
     for (int i = kShadowMargin; i >= 1; --i) {
         const qreal t = qreal(kShadowMargin - i + 1) / kShadowMargin;   // 0 outer → 1 inner
-        const int alpha = int(16.0 * t * t);
+        const int alpha = int(16.0 * t * t * opacity);
         if (alpha <= 0)
             continue;
         p.setBrush(QColor(0, 0, 0, alpha));
         p.drawRoundedRect(card.adjusted(-i, -i, i, i), kCornerRadius + i, kCornerRadius + i);
     }
+}
+
+void NoteWindow::paintCard(QPainter &p)
+{
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    // The card covers the note area (the transparent shadow border belongs to
+    // NoteWindow, see paintEvent()).
+    const QRectF card(QPointF(0, 0), m_card->size());
 
     // Rounded background, clipped to the corners.
     QPainterPath path;
@@ -952,12 +1036,19 @@ void NoteWindow::paintEvent(QPaintEvent *event)
     p.restore();
 }
 
+bool NoteWindow::titleBarContains(const QPoint &pos) const
+{
+    return m_titleBar->rect().contains(m_titleBar->mapFrom(this, pos));
+}
+
 void NoteWindow::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
+    // The grip lives in the card, so its coordinates are card-relative.
     const QSize sz = event->size();
-    m_resizeGrip->move(sz.width() - kShadowMargin - kResizeGrip,
-                       sz.height() - kShadowMargin - kResizeGrip);
+    const int cardW = sz.width() - 2 * kShadowMargin;
+    const int cardH = sz.height() - 2 * kShadowMargin;
+    m_resizeGrip->move(cardW - kResizeGrip, cardH - kResizeGrip);
     m_resizeGrip->raise();
 }
 
@@ -976,7 +1067,8 @@ void NoteWindow::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    if (!m_collapsed && m_resizeGrip->isVisible() && m_resizeGrip->geometry().contains(pos)) {
+    if (!m_collapsed && m_resizeGrip->isVisible()
+        && m_resizeGrip->rect().contains(m_resizeGrip->mapFrom(this, pos))) {
         m_resizing = true;
         m_resizeRefLocal = pos;
         m_resizeStartSize = QSize(m_note.w, m_note.h);
@@ -984,7 +1076,7 @@ void NoteWindow::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    if (m_titleBar->geometry().contains(pos)) {
+    if (titleBarContains(pos)) {
         m_dragging = true;
         m_dragRefLocal = pos;
         setCursor(Qt::ClosedHandCursor);
@@ -1058,7 +1150,7 @@ void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
 void NoteWindow::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton
-        && m_titleBar->geometry().contains(event->position().toPoint())) {
+        && titleBarContains(event->position().toPoint())) {
         beginTitleEdit();
         event->accept();
         return;
@@ -1225,6 +1317,18 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         });
     }
 
+    QMenu *opacity = menu.addMenu(I18n::t(QStringLiteral("note.opacity")));
+    for (int pct = 100; pct >= 10; pct -= 10) {
+        QAction *a = opacity->addAction(QStringLiteral("%1%").arg(pct));
+        a->setCheckable(true);
+        a->setChecked(pct == m_note.opacity);
+        connect(a, &QAction::triggered, this, [this, pct] {
+            m_note.opacity = pct;
+            applyOpacity();
+            emit opacityEdited(m_note.id, pct);
+        });
+    }
+
     QAction *ontop = menu.addAction(I18n::t(QStringLiteral("note.always_on_top")));
     ontop->setCheckable(true);
     ontop->setChecked(isAlwaysOnTop());
@@ -1253,7 +1357,7 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
 
 void NoteWindow::contextMenuEvent(QContextMenuEvent *event)
 {
-    if (m_titleBar->geometry().contains(event->pos()))
+    if (titleBarContains(event->pos()))
         buildContextMenu(event->globalPos());
     else
         QWidget::contextMenuEvent(event);

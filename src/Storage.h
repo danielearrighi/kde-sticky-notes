@@ -39,6 +39,7 @@ public:
     void updateLayer(qint64 id, const QString &layer);
     void updateCollapsed(qint64 id, bool collapsed);
     void updateScroll(qint64 id, int scroll);
+    void updateOpacity(qint64 id, int opacity);
     void setVisible(qint64 id, bool visible);
     void softDelete(qint64 id);
     void restore(qint64 id);

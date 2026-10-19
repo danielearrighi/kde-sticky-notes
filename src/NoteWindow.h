@@ -9,6 +9,7 @@
 namespace LayerShellQt { class Window; }
 
 class QImage;
+class QPainter;
 class QLabel;
 class QLineEdit;
 class QTextEdit;
@@ -56,6 +57,7 @@ signals:
     void layerEdited(qint64 id, const QString &layer);
     void collapsedEdited(qint64 id, bool collapsed);
     void scrollEdited(qint64 id, int scroll);
+    void opacityEdited(qint64 id, int opacity);
     void deleteRequested(qint64 id);
     void hideRequested(qint64 id);
     void newNoteRequested();
@@ -89,6 +91,14 @@ private:
     /// placement, to record the per-screen position).
     void placeOnScreens(bool proportional, bool forceEmit);
     void applyStyle();
+    void applyOpacity();
+
+    /// Paints the rounded note background and the title strip in the card.
+    void paintCard(QPainter &p);
+
+    /// True when \a pos (in NoteWindow coordinates) is over the title bar.
+    bool titleBarContains(const QPoint &pos) const;
+
     void refreshTitleLabel();
     void beginTitleEdit();
     void commitTitleEdit();
@@ -139,6 +149,7 @@ private:
     Theme m_theme;
 
     LayerShellQt::Window *m_layer = nullptr;
+    QWidget *m_card = nullptr;
     QWidget *m_titleBar = nullptr;
     QLabel *m_titleLabel = nullptr;
     QLineEdit *m_titleEdit = nullptr;

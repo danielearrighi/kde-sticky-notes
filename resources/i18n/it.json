@@ -36,6 +36,7 @@
   "note.minimize": "Riduci a icona",
   "note.delete": "Elimina nota",
   "note.color": "Colore nota",
+  "note.opacity": "Opacità",
   "note.always_on_top": "Sempre in primo piano",
   "note.duplicate": "Duplica",
   "note.hide": "Nascondi nota",

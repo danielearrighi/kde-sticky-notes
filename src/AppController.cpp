@@ -191,6 +191,9 @@ NoteWindow *AppController::ensureWindow(const Note &note)
     connect(w, &NoteWindow::scrollEdited, this, [](qint64 id, int scroll) {
         Storage::instance().updateScroll(id, scroll);
     });
+    connect(w, &NoteWindow::opacityEdited, this, [](qint64 id, int opacity) {
+        Storage::instance().updateOpacity(id, opacity);
+    });
     connect(w, &NoteWindow::deleteRequested, this, &AppController::onDeleteNote);
     connect(w, &NoteWindow::hideRequested, this, [this](qint64 id) { onVisibilityToggled(id, false); });
     connect(w, &NoteWindow::newNoteRequested, this, &AppController::onNewNote);
