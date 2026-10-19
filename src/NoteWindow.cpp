@@ -23,6 +23,7 @@
 #include <QBuffer>
 #include <QIcon>
 #include <QApplication>
+#include <QClipboard>
 #include <QScreen>
 #include <QMimeData>
 #include <QUrl>
@@ -161,7 +162,28 @@ public:
         m_imageHandler = std::move(handler);
     }
 
+    void setPlainPasteHandler(std::function<void()> handler)
+    {
+        m_plainPasteHandler = std::move(handler);
+    }
+
 protected:
+    void keyPressEvent(QKeyEvent *event) override
+    {
+        // Ctrl+Shift+V: paste without formatting. Handled here (and not as a
+        // QAction shortcut) so it works whenever the body has focus, including
+        // while the context menu is closed.
+        const Qt::KeyboardModifiers mods = event->modifiers() & ~Qt::KeypadModifier;
+        if (event->key() == Qt::Key_V
+            && mods == (Qt::ControlModifier | Qt::ShiftModifier)
+            && m_plainPasteHandler) {
+            m_plainPasteHandler();
+            event->accept();
+            return;
+        }
+        QTextEdit::keyPressEvent(event);
+    }
+
     bool canInsertFromMimeData(const QMimeData *source) const override
     {
         if (source && (source->hasImage() || source->hasUrls()))
@@ -209,6 +231,7 @@ private:
     }
 
     std::function<bool(const QImage &)> m_imageHandler;
+    std::function<void()> m_plainPasteHandler;
 };
 
 } // namespace
@@ -276,6 +299,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     auto *noteBody = new NoteBodyEdit(this);
     m_body = noteBody;
     noteBody->setImageHandler([this](const QImage &image) { return insertImage(image); });
+    noteBody->setPlainPasteHandler([this] { pastePlainText(); });
     m_body->setObjectName(QStringLiteral("body"));
     m_body->setFrameShape(QFrame::NoFrame);
     m_body->setAcceptRichText(true);
@@ -1114,12 +1138,48 @@ void NoteWindow::clearFormatting()
     c.mergeCharFormat(fmt);
 }
 
+void NoteWindow::pastePlainText()
+{
+    const QMimeData *mime = QApplication::clipboard()->mimeData();
+    if (!mime)
+        return;
+
+    if (mime->hasText()) {
+        // Insert the plain text with a clean character format: dropping the
+        // HTML alone is not enough, because QTextEdit would otherwise keep the
+        // color/background of the cursor's current format (e.g. inherited from
+        // a previous rich paste). Foreground is set to the note's text color so
+        // the result matches the theme; everything else is left at its default
+        // (normal weight, no italic/underline/strike, no background).
+        QTextCharFormat fmt;
+        fmt.setForeground(QColor(m_theme.text));
+        QTextCursor c = m_body->textCursor();
+        c.beginEditBlock();
+        c.insertText(mime->text(), fmt);
+        c.endEditBlock();
+        return;
+    }
+
+    // No text on the clipboard (an image, or image files): keep the normal
+    // paste behaviour so the shortcut stays useful.
+    m_body->paste();
+}
+
 // -------------------------------------------------------------- menu
 
 void NoteWindow::buildContextMenu(const QPoint &globalPos)
 {
     QMenu menu;
     const QTextCharFormat cur = m_body->currentCharFormat();
+
+    // Clipboard: paste while dropping the HTML (colors, backgrounds, fonts)
+    // copied from a web page. Ctrl+Shift+V is handled by the body itself; the
+    // shortcut here is only displayed in the menu.
+    QAction *plainPaste = menu.addAction(I18n::t(QStringLiteral("paste_plain")));
+    plainPaste->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+V")));
+    connect(plainPaste, &QAction::triggered, this, &NoteWindow::pastePlainText);
+
+    menu.addSeparator();
 
     QAction *bold = menu.addAction(I18n::t(QStringLiteral("format.bold")));
     bold->setShortcut(QKeySequence::Bold);

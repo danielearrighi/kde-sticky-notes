@@ -9,6 +9,7 @@
   "hide": "Hide",
   "show": "Show",
   "new_note": "New note",
+  "paste_plain": "Paste without formatting",
   "app.tab_notes": "Notes",
   "app.tab_trash": "Trash",
   "app.tab_settings": "Settings",

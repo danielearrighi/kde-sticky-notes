@@ -127,6 +127,7 @@ private:
     void applyCollapsedVisuals();
 
     // formatting
+    void pastePlainText();
     void toggleBold();
     void toggleItalic();
     void toggleUnderline();
