@@ -24,6 +24,7 @@
 #include <QBuffer>
 #include <QIcon>
 #include <QApplication>
+#include <QWindow>
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QPalette>
@@ -616,6 +617,10 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
 
     // layer-shell
     createWinId();
+    // Catch mouse presses before QWidgetWindow dispatches them: a note is
+    // unfocusable until the user interacts with it (see configureLayerShell()).
+    if (QWindow *wh = windowHandle())
+        wh->installEventFilter(this);
     configureLayerShell();
     m_note.w = qMax(kMinW, m_note.w);
     m_note.h = qMax(kMinH, m_note.h);
@@ -652,7 +657,20 @@ void NoteWindow::configureLayerShell()
     using LS = LayerShellQt::Window;
     m_layer->setScope(QStringLiteral("sticky-notes-note"));
     m_layer->setLayer(m_note.layer == QLatin1String("bottom") ? LS::LayerBottom : LS::LayerTop);
-    m_layer->setKeyboardInteractivity(LS::KeyboardInteractivityOnDemand);
+    // A note is not focusable by default. With OnDemand always set, KWin
+    // considers the note a focus candidate (wantsInput()) and hands it the
+    // keyboard as soon as no normal window has focus: when the last window is
+    // minimized a note starts blinking its caret, and the WindowActivate event
+    // raises it to the top layer for a moment (visible as a flash when the
+    // window is restored).
+    //
+    // Keyboard interactivity is therefore enabled only when the user really
+    // interacts with the note (a mouse press, see eventFilter()) or when the
+    // app explicitly activates it (activate(), e.g. a new note), and it is
+    // disabled again as soon as focus is lost (onFocusLayerTimeout()).
+    // Note: setActivateOnShow() has no effect while interactivity is None, so
+    // notes shown at startup do not steal the focus from any window.
+    m_layer->setKeyboardInteractivity(LS::KeyboardInteractivityNone);
     m_layer->setExclusiveZone(0);
     m_layer->setActivateOnShow(true);
     m_layer->setAnchors(LS::Anchors::fromInt(int(LS::AnchorTop) | int(LS::AnchorLeft)));
@@ -853,6 +871,50 @@ void NoteWindow::applyEffectiveLayer()
     update();
 }
 
+void NoteWindow::setKeyboardInteractive(bool interactive)
+{
+    if (!m_layer)
+        return;
+    using LS = LayerShellQt::Window;
+    const LS::KeyboardInteractivity mode = interactive ? LS::KeyboardInteractivityOnDemand
+                                                       : LS::KeyboardInteractivityNone;
+    if (m_layer->keyboardInteractivity() == mode)
+        return;
+    m_layer->setKeyboardInteractivity(mode);
+
+    // The keyboard interactivity is double-buffered as well: force a commit
+    // with the same minimal damage used by applyMargins() (a full update() would
+    // repaint the body, images included).
+    update(QRect(0, 0, kShadowMargin, kShadowMargin));
+}
+
+void NoteWindow::requestKeyboardFocus()
+{
+    // A bottom-layer note is raised first: KWin only activates top/overlay
+    // on-demand surfaces when their keyboard interactivity is switched on
+    // (LayerShellV1Window::handleAcceptsFocusChanged()), while a bottom surface
+    // stays below normal windows and never takes the keyboard. Raising it is
+    // what WindowActivate would do anyway a moment later; if the request is
+    // refused, the focus timer lowers it again.
+    const bool raised = !isActiveWindow() && m_note.layer == QLatin1String("bottom");
+    if (raised) {
+        m_raisedForFocus = true;
+        applyEffectiveLayer();
+    }
+    setKeyboardInteractive(true);
+    if (QWindow *wh = windowHandle())
+        wh->requestActivate();
+
+    if (raised) {
+        // Safeguard: if the compositor refuses the focus request, do not leave
+        // a bottom note raised and focusable (it would be the very focus
+        // candidate this change avoids). WindowActivate stops the timer when
+        // the note really gets the focus; onFocusLayerTimeout() also handles
+        // the popup case.
+        m_focusLayerTimer->start();
+    }
+}
+
 bool NoteWindow::event(QEvent *event)
 {
     // Note: WindowActivate/WindowDeactivate do NOT go through changeEvent()
@@ -890,6 +952,10 @@ void NoteWindow::onFocusLayerTimeout()
 
     m_raisedForFocus = false;
     applyEffectiveLayer();
+    // Really unfocused: stop being a focus candidate, otherwise the
+    // compositor would hand the keyboard to this note when no normal window
+    // has focus (see configureLayerShell()).
+    setKeyboardInteractive(false);
 }
 
 void NoteWindow::setVisibleState(bool visible)
@@ -899,6 +965,7 @@ void NoteWindow::setVisibleState(bool visible)
         // Hidden: no focus possible, return to the configured layer.
         m_focusLayerTimer->stop();
         m_raisedForFocus = false;
+        setKeyboardInteractive(false);
         applyEffectiveLayer();
         persistScroll();
         setVisible(false);
@@ -913,14 +980,14 @@ void NoteWindow::setVisibleState(bool visible)
 void NoteWindow::activate()
 {
     ensureOnScreen();
+    // Enable keyboard interactivity before showing: setActivateOnShow() only
+    // requests activation when the surface is not None.
+    setKeyboardInteractive(true);
     show();
     raise();
-    if (m_layer)
-        m_layer->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityOnDemand);
     // Asks the compositor for focus: this way a "desktop" note opened from the
     // hub is really brought to the front (and stays there while it has focus).
-    if (QWindow *wh = windowHandle())
-        wh->requestActivate();
+    requestKeyboardFocus();
     m_body->setFocus();
 }
 
@@ -1264,6 +1331,15 @@ void NoteWindow::resizeEvent(QResizeEvent *event)
 
 bool NoteWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    // A note is not a focus candidate until the user interacts with it (see
+    // configureLayerShell()). The press is caught on the QWindow, before
+    // QWidgetWindow dispatches it to the body/title bar/buttons.
+    if (watched == windowHandle() && event->type() == QEvent::MouseButtonPress) {
+        if (!isActiveWindow())
+            requestKeyboardFocus();
+        return false;   // keep normal event delivery
+    }
+
     if (watched == m_titleEdit && event->type() == QEvent::FocusOut)
         commitTitleEdit();
     return QWidget::eventFilter(watched, event);

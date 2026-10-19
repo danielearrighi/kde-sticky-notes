@@ -80,6 +80,16 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   (the slow body repaint makes the surface lag the pointer). Drag math must use
   the **local** coordinate incrementally with a fixed press reference (see
   `NoteWindow::mouseMoveEvent()`), never `globalPosition()` as an absolute base.
+- Notes are layer-shell surfaces with keyboard interactivity **None** unless the
+  user interacts with them: `NoteWindow::requestKeyboardFocus()` enables
+  OnDemand on a mouse press or `activate()`, and `onFocusLayerTimeout()` resets
+  it to None when focus is lost. Keeping OnDemand always set makes KWin treat
+  every note as a focus candidate and hand it the keyboard as soon as no normal
+  window has focus (e.g. the last window is minimized): the caret starts
+  blinking and the note is briefly raised to the top layer. A bottom-layer note
+  must be raised *before* OnDemand is enabled, because KWin activates only
+  top/overlay on-demand surfaces when their interactivity changes
+  (`LayerShellV1Window::handleAcceptsFocusChanged()`).
 - Do not reference /docs files since they are not committed to the repository.
 
 ## Notes for agents (context budget)

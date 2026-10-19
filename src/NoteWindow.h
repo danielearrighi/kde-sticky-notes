@@ -126,6 +126,15 @@ private:
     /// note (bottom layer). On focus loss it returns to the configured layer.
     void applyEffectiveLayer();
 
+    /// Switches the surface between KeyboardInteractivityOnDemand (true) and
+    /// KeyboardInteractivityNone (false). A note is only focusable while the
+    /// user is interacting with it; see the comment in configureLayerShell().
+    void setKeyboardInteractive(bool interactive);
+
+    /// Enables keyboard interactivity and asks the compositor to activate the
+    /// note (used by activate() and by a mouse press on an unfocused note).
+    void requestKeyboardFocus();
+
     /// Deferred check (m_focusLayerTimer) that focus is really lost.
     void onFocusLayerTimeout();
 
