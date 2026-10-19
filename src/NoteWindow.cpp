@@ -1218,16 +1218,72 @@ void NoteWindow::makeList(bool numbered)
 
 void NoteWindow::clearFormatting()
 {
-    QTextCursor c = m_body->textCursor();
-    if (!c.hasSelection())
-        c.select(QTextCursor::Document);
-    QTextCharFormat fmt;
-    fmt.setFontWeight(QFont::Normal);
-    fmt.setFontItalic(false);
-    fmt.setFontUnderline(false);
-    fmt.setFontStrikeOut(false);
-    fmt.setForeground(QColor(m_theme.text));
-    c.mergeCharFormat(fmt);
+    QTextCursor selection = m_body->textCursor();
+    if (!selection.hasSelection())
+        selection.select(QTextCursor::Document);
+
+    QTextDocument *doc = m_body->document();
+    const int start = selection.selectionStart();
+    const int end = selection.selectionEnd();
+
+    // A fresh format, applied with setCharFormat() instead of mergeCharFormat():
+    // replacing the format is what also drops the background and the fonts
+    // inherited from a rich paste, while a merge would only override the
+    // properties listed here.
+    QTextCharFormat clean;
+    clean.setFontWeight(QFont::Normal);
+    clean.setFontItalic(false);
+    clean.setFontUnderline(false);
+    clean.setFontStrikeOut(false);
+    clean.setForeground(QColor(m_theme.text));
+    clean.clearBackground();
+
+    // The ranges are collected first: changing a format can split or merge
+    // fragments and would invalidate the iterators (as in applyImageSizing()).
+    // Image fragments are skipped because setCharFormat() replaces the whole
+    // char format and would delete the embedded image.
+    QList<QPair<int, int>> ranges;   // (position, length)
+    for (QTextBlock block = doc->findBlock(start);
+         block.isValid() && block.position() < end; block = block.next()) {
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment fragment = it.fragment();
+            if (!fragment.isValid() || fragment.charFormat().isImageFormat())
+                continue;
+            const int from = qMax(fragment.position(), start);
+            const int to = qMin(fragment.position() + fragment.length(), end);
+            if (from < to)
+                ranges.append({from, to - from});
+        }
+    }
+
+    QTextCursor c(doc);
+    c.beginEditBlock();
+    for (const QPair<int, int> &range : ranges) {
+        c.setPosition(range.first);
+        c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
+        c.setCharFormat(clean);
+    }
+
+    // A white background pasted from a web page can also be stored in the
+    // block format (paragraph background) and in the block char format (the
+    // paragraph mark), which the character format reset does not touch. Lists,
+    // indentation and alignment are preserved.
+    for (QTextBlock block = doc->findBlock(start);
+         block.isValid() && block.position() < end; block = block.next()) {
+        QTextBlockFormat bf = block.blockFormat();
+        QTextCursor blockCursor(block);
+        if (bf.hasProperty(QTextFormat::BackgroundBrush)) {
+            bf.clearBackground();
+            blockCursor.setBlockFormat(bf);
+        }
+        blockCursor.setBlockCharFormat(clean);
+    }
+    c.endEditBlock();
+
+    // The insertion format may still carry the old background: make sure text
+    // typed right after the reset starts clean too.
+    if (!m_body->textCursor().hasSelection())
+        m_body->setCurrentCharFormat(clean);
 }
 
 void NoteWindow::pastePlainText()
