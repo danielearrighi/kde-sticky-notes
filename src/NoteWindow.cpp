@@ -25,6 +25,9 @@
 #include <QIcon>
 #include <QApplication>
 #include <QClipboard>
+#include <QDesktopServices>
+#include <QPalette>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QMimeData>
 #include <QUrl>
@@ -147,8 +150,9 @@ QSize imagePixelSize(QTextDocument *doc, const QString &name)
 
 /// QTextEdit that turns a pasted/dropped image into a note image: the handler
 /// installed by NoteWindow stores it inside the document (see
-/// NoteWindow::insertImage()). Everything else keeps the QTextEdit behaviour
-/// (plain text, HTML, file links).
+/// NoteWindow::insertImage()). It also recognizes URLs typed or pasted in the
+/// body (see linkifyRange()) and opens anchors with Ctrl+Click. Everything else
+/// keeps the QTextEdit behaviour (plain text, HTML, file links).
 ///
 /// Ctrl+V, Shift+Insert, the "Paste" entry of the context menu and drag & drop
 /// all funnel through insertFromMimeData(): QTextEdit::paste() goes to an
@@ -156,7 +160,13 @@ QSize imagePixelSize(QTextDocument *doc, const QString &name)
 class NoteBodyEdit : public QTextEdit
 {
 public:
-    explicit NoteBodyEdit(QWidget *parent = nullptr) : QTextEdit(parent) {}
+    explicit NoteBodyEdit(QWidget *parent = nullptr) : QTextEdit(parent)
+    {
+        connect(document(), &QTextDocument::contentsChange, this,
+                [this](int position, int charsRemoved, int charsAdded) {
+                    handleContentsChange(position, charsRemoved, charsAdded);
+                });
+    }
 
     void setImageHandler(std::function<bool(const QImage &)> handler)
     {
@@ -167,6 +177,12 @@ public:
     {
         m_plainPasteHandler = std::move(handler);
     }
+
+    /// Enables the automatic recognition of URLs typed or pasted in the body.
+    /// It is off while the note is loaded from Markdown: QTextDocument already
+    /// creates the anchors there, and modifying the document during the import
+    /// would interfere with it.
+    void setLinkifyEnabled(bool enabled) { m_linkifyEnabled = enabled; }
 
 protected:
     void keyPressEvent(QKeyEvent *event) override
@@ -183,6 +199,45 @@ protected:
             return;
         }
         QTextEdit::keyPressEvent(event);
+    }
+
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        // Ctrl+Click on a link opens it in the browser instead of moving the
+        // text cursor. AnchorAt() also works for the links created by the
+        // Markdown import and by linkifyRange().
+        if (event->button() == Qt::LeftButton
+            && event->modifiers().testFlag(Qt::ControlModifier)) {
+            const QString href = anchorAt(event->position().toPoint());
+            if (!href.isEmpty() && openLink(href)) {
+                m_linkPressed = true;
+                event->accept();
+                return;
+            }
+        }
+        QTextEdit::mousePressEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        if (m_linkPressed) {
+            m_linkPressed = false;
+            event->accept();
+            return;
+        }
+        QTextEdit::mouseReleaseEvent(event);
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        // The pointing hand while Ctrl is held tells that the link can be
+        // opened; without Ctrl the text cursor behaviour is left untouched.
+        if (!m_linkPressed) {
+            const bool overLink = event->modifiers().testFlag(Qt::ControlModifier)
+                && !anchorAt(event->position().toPoint()).isEmpty();
+            viewport()->setCursor(overLink ? Qt::PointingHandCursor : Qt::IBeamCursor);
+        }
+        QTextEdit::mouseMoveEvent(event);
     }
 
     bool canInsertFromMimeData(const QMimeData *source) const override
@@ -217,6 +272,155 @@ protected:
     }
 
 private:
+    /// The URL pattern accepted in the note body. Markdown links ([text](url))
+    /// are already turned into anchors by QTextDocument::setMarkdown(); this is
+    /// for URLs typed or pasted while editing.
+    static const QRegularExpression &linkPattern()
+    {
+        static const QRegularExpression pattern(
+            QStringLiteral(R"((?:https?://|www\.)[^\s<>"'`]+)"),
+            QRegularExpression::CaseInsensitiveOption);
+        return pattern;
+    }
+
+    /// End of the link match after dropping the punctuation that usually
+    /// follows a URL in prose (".", ",", an unbalanced closing bracket, ...).
+    static int linkEnd(const QString &text, int start, int end)
+    {
+        while (end > start) {
+            const QChar ch = text.at(end - 1);
+            if (QStringLiteral(".,;:!?'\"").contains(ch)) {
+                --end;
+                continue;
+            }
+            if (ch == QLatin1Char(')') || ch == QLatin1Char(']') || ch == QLatin1Char('}')) {
+                const QChar opening = ch == QLatin1Char(')') ? QLatin1Char('(')
+                    : ch == QLatin1Char(']') ? QLatin1Char('[') : QLatin1Char('{');
+                const QString range = text.mid(start, end - start);
+                if (range.count(ch) > range.count(opening)) {
+                    --end;
+                    continue;
+                }
+            }
+            break;
+        }
+        return end;
+    }
+
+    /// True when [start, end) of \a text is the target of a Markdown link
+    /// ([label](url) or <url>): those are left to the Markdown importer,
+    /// otherwise the anchor added here would corrupt the link syntax.
+    static bool isMarkdownTarget(const QString &text, int start, int end)
+    {
+        if (start >= 2 && text.at(start - 1) == QLatin1Char('(')
+            && text.at(start - 2) == QLatin1Char(']'))
+            return true;
+        return start >= 1 && text.at(start - 1) == QLatin1Char('<')
+            && end < text.size() && text.at(end) == QLatin1Char('>');
+    }
+
+    static bool openLink(const QString &href)
+    {
+        const QUrl url = QUrl::fromUserInput(href);
+        if (!url.isValid() || url.isEmpty())
+            return false;
+        const QString scheme = url.scheme().toLower();
+        if (scheme != QLatin1String("http") && scheme != QLatin1String("https")
+            && scheme != QLatin1String("mailto"))
+            return false;
+        return QDesktopServices::openUrl(url);
+    }
+
+    /// Turns every naked URL in [from, to) into an anchor (keeping the text and
+    /// its existing character format) so it can be opened with Ctrl+Click.
+    void linkifyRange(int from, int to)
+    {
+        if (!m_linkifyEnabled || from < 0)
+            return;
+        to = qMin(to, document()->characterCount() - 1);
+        if (from >= to)
+            return;
+
+        QTextCursor scan(document());
+        scan.setPosition(from);
+        scan.setPosition(to, QTextCursor::KeepAnchor);
+        const QString text = scan.selectedText();
+        if (text.isEmpty())
+            return;
+
+        QList<QPair<int, int>> ranges;   // (position, length) in the document
+        QRegularExpressionMatchIterator matches = linkPattern().globalMatch(text);
+        while (matches.hasNext()) {
+            const QRegularExpressionMatch match = matches.next();
+            const int start = match.capturedStart();
+            const int end = linkEnd(text, start, match.capturedEnd());
+            if (end > start && !isMarkdownTarget(text, start, end))
+                ranges.append({from + start, end - start});
+        }
+        if (ranges.isEmpty())
+            return;
+
+        // The format the cursor had before the link: restored below when the
+        // cursor ends up at the end of a freshly linked URL, so the next typed
+        // character does not inherit the link colour/underline.
+        const QTextCharFormat before = textCursor().charFormat();
+
+        m_linkifying = true;
+        QTextCursor c(document());
+        c.beginEditBlock();
+        for (const QPair<int, int> &range : ranges) {
+            c.setPosition(range.first);
+            c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
+            QTextCharFormat fmt = c.charFormat();
+            if (fmt.isAnchor())
+                continue;   // already a link: keep its href and formatting
+            QString href = text.mid(range.first - from, range.second);
+            if (href.startsWith(QLatin1String("www."), Qt::CaseInsensitive))
+                href.prepend(QStringLiteral("https://"));
+            fmt.setAnchor(true);
+            fmt.setAnchorHref(href);
+            fmt.setFontUnderline(true);
+            fmt.setForeground(palette().color(QPalette::Link));
+            c.mergeCharFormat(fmt);
+        }
+        c.endEditBlock();
+
+        if (textCursor().charFormat().isAnchor())
+            setCurrentCharFormat(before);
+
+        m_linkifying = false;
+    }
+
+    /// Linkifies a word as soon as it is terminated by a space/Enter, or the
+    /// text just pasted/inserted. Formatting-only changes (bold, clear
+    /// formatting, ...) are ignored: they report the same removed/added length.
+    void handleContentsChange(int position, int charsRemoved, int charsAdded)
+    {
+        if (!m_linkifyEnabled || m_linkifying || charsAdded <= 0
+            || charsRemoved == charsAdded)
+            return;
+
+        if (charsRemoved > 0 || charsAdded > 1) {
+            linkifyRange(position, position + charsAdded);
+            return;
+        }
+
+        QTextCursor inserted(document());
+        inserted.setPosition(position);
+        inserted.setPosition(position + charsAdded, QTextCursor::KeepAnchor);
+        const QString added = inserted.selectedText();
+        if (added.size() != 1 || !added.at(0).isSpace())
+            return;   // still typing the URL: wait for its end
+
+        int end = position;
+        while (end > 0 && document()->characterAt(end - 1).isSpace())
+            --end;
+        int start = end;
+        while (start > 0 && !document()->characterAt(start - 1).isSpace())
+            --start;
+        linkifyRange(start, end);
+    }
+
     /// The image carried by the MIME data as image data (a screenshot, a copy
     /// from another application), or a null image.
     static QImage imageFromMimeData(const QMimeData *source)
@@ -233,6 +437,9 @@ private:
 
     std::function<bool(const QImage &)> m_imageHandler;
     std::function<void()> m_plainPasteHandler;
+    bool m_linkifyEnabled = false;
+    bool m_linkifying = false;
+    bool m_linkPressed = false;
 };
 
 /// Container of the note card: it paints the rounded background and the title
@@ -394,6 +601,9 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_body->document()->setMarkdown(m_note.content);
     applyImageSizing();   // Markdown carries no image size: refit to the note width
     m_body->document()->clearUndoRedoStacks();
+    // From now on URLs typed or pasted are recognized; doing it during the
+    // Markdown import would interfere with QTextDocument::setMarkdown().
+    static_cast<NoteBodyEdit *>(m_body)->setLinkifyEnabled(true);
     m_loading = false;
 
     refreshTitleLabel();
@@ -1229,7 +1439,8 @@ void NoteWindow::clearFormatting()
     // A fresh format, applied with setCharFormat() instead of mergeCharFormat():
     // replacing the format is what also drops the background and the fonts
     // inherited from a rich paste, while a merge would only override the
-    // properties listed here.
+    // properties listed here. Links are dropped too, because this format has no
+    // anchor properties (the URL text itself stays).
     QTextCharFormat clean;
     clean.setFontWeight(QFont::Normal);
     clean.setFontItalic(false);
