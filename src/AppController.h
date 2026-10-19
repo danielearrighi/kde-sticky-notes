@@ -54,6 +54,8 @@ private:
     NoteWindow *ensureWindow(const Note &note);
     void removeWindow(qint64 id);
     void createNewNote();
+    void showAllNotes();
+    void hideAllNotes();
     void applyAutostart();
     void setupTray();
     void updateTrayVisibility();

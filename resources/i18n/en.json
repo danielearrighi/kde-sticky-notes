@@ -17,6 +17,8 @@
   "app.quit": "Quit app",
   "app.close_to_tray": "Close to Tray",
   "app.tray_show": "Show window",
+  "app.tray_show_notes": "Show notes",
+  "app.tray_hide_notes": "Hide notes",
   "app.db_error": "Cannot open the database:\n%1",
   "app.autostart_comment": "Sticky notes on the desktop",
   "notes.your_notes": "Your Notes",

@@ -315,6 +315,35 @@ void AppController::onVisibilityToggled(qint64 id, bool visible)
         m_hub->refresh();
 }
 
+void AppController::showAllNotes()
+{
+    bool changed = false;
+    for (const Note &n : Storage::instance().notes(false)) {
+        if (n.visible)
+            continue;
+        Storage::instance().setVisible(n.id, true);
+        ensureWindow(n)->setVisibleState(true);
+        changed = true;
+    }
+    if (changed && m_hub)
+        m_hub->refresh();
+}
+
+void AppController::hideAllNotes()
+{
+    bool changed = false;
+    for (const Note &n : Storage::instance().notes(false)) {
+        if (!n.visible)
+            continue;
+        Storage::instance().setVisible(n.id, false);
+        if (NoteWindow *w = m_windows.value(n.id))
+            w->setVisibleState(false);
+        changed = true;
+    }
+    if (changed && m_hub)
+        m_hub->refresh();
+}
+
 void AppController::onDeleteNote(qint64 id)
 {
     if (Storage::instance().setting(QStringLiteral("confirm_delete"), QStringLiteral("1")) != QLatin1String("0")) {
@@ -421,6 +450,11 @@ void AppController::setupTray()
     auto *menu = new QMenu(m_hub);
     QAction *show = menu->addAction(I18n::t(QStringLiteral("app.tray_show")));
     connect(show, &QAction::triggered, this, &AppController::showHub);
+    menu->addSeparator();
+    QAction *showNotes = menu->addAction(I18n::t(QStringLiteral("app.tray_show_notes")));
+    connect(showNotes, &QAction::triggered, this, &AppController::showAllNotes);
+    QAction *hideNotes = menu->addAction(I18n::t(QStringLiteral("app.tray_hide_notes")));
+    connect(hideNotes, &QAction::triggered, this, &AppController::hideAllNotes);
     menu->addSeparator();
     QAction *quit = menu->addAction(I18n::t(QStringLiteral("app.quit")));
     connect(quit, &QAction::triggered, this, [] { QApplication::quit(); });
