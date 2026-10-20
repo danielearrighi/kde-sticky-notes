@@ -207,7 +207,8 @@ private:
     QSize m_resizeStartSize;
     bool m_loading = false;
 
-    /// Key of the screen the note is currently on ("<W>x<H>|<connector>").
+    /// Key of the screen the note is currently on ("<W>x<H>|<connector>", built
+    /// by screenKeyOf()).
     QString m_screenKey;
     /// Available geometry (global) of the screen the note is on. Kept even after
     /// that screen disappears, as the source of the proportional mapping.

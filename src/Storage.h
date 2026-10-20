@@ -24,7 +24,9 @@ public:
     Note note(qint64 id) const;
     qint64 insertNote(Note n);
     void updateContent(qint64 id, const QString &title, const QString &content);
-    void updateGeometry(qint64 id, int x, int y, int w, int h);
+    /// Updates the note geometry only. Returns false (and logs the SQL error)
+    /// when the update fails.
+    bool updateGeometry(qint64 id, int x, int y, int w, int h);
     /// Persists the geometry and records it under \a screenKey (per-screen
     /// positions) and as the note's last screen. x,y are screen-relative.
     void saveNotePlacement(qint64 id, int x, int y, int w, int h, const QString &screenKey);

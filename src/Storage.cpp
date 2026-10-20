@@ -109,8 +109,8 @@ void Storage::ensureSchema()
         " value TEXT)"));
 
     // Per-screen note positions: where a note sits on each monitor, keyed by the
-    // screen key ("<W>x<H>|<connector>"). Separate from notes.x/y, which stays as
-    // the fallback / last known position.
+    // screen key ("<W>x<H>|<connector>", built by screenKeyOf()). Separate from
+    // notes.x/y, which stays as the fallback / last known position.
     q.exec(QStringLiteral(
         "CREATE TABLE IF NOT EXISTS note_positions ("
         " note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,"
@@ -235,7 +235,7 @@ void Storage::updateContent(qint64 id, const QString &title, const QString &cont
     q.exec();
 }
 
-void Storage::updateGeometry(qint64 id, int x, int y, int w, int h)
+bool Storage::updateGeometry(qint64 id, int x, int y, int w, int h)
 {
     QSqlQuery q(db());
     q.prepare(QStringLiteral("UPDATE notes SET x=?,y=?,w=?,h=? WHERE id=?"));
@@ -244,34 +244,60 @@ void Storage::updateGeometry(qint64 id, int x, int y, int w, int h)
     q.addBindValue(w);
     q.addBindValue(h);
     q.addBindValue(id);
-    q.exec();
+    if (!q.exec()) {
+        qWarning() << "Storage::updateGeometry:" << q.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 void Storage::saveNotePlacement(qint64 id, int x, int y, int w, int h, const QString &screenKey)
 {
-    updateGeometry(id, x, y, w, h);
+    // The geometry, the last screen and the per-screen position describe one
+    // placement: write them in a single transaction so a failure cannot leave
+    // them out of sync.
+    QSqlDatabase database = db();
+    const bool inTransaction = database.transaction();
+    if (!inTransaction)
+        qWarning() << "Storage::saveNotePlacement: cannot start a transaction:"
+                   << database.lastError().text();
 
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral("UPDATE notes SET last_screen_key=? WHERE id=?"));
-    q.addBindValue(bindText(screenKey));
-    q.addBindValue(id);
-    q.exec();
+    bool ok = updateGeometry(id, x, y, w, h);
+    {
+        QSqlQuery q(database);
+        q.prepare(QStringLiteral("UPDATE notes SET last_screen_key=? WHERE id=?"));
+        q.addBindValue(bindText(screenKey));
+        q.addBindValue(id);
+        if (!q.exec()) {
+            ok = false;
+            qWarning() << "Storage::saveNotePlacement:" << q.lastError().text();
+        }
+    }
 
     // The per-screen position is only meaningful for a real screen key (an
     // empty key means "no screen": keep the fallback only).
-    if (screenKey.isEmpty())
-        return;
-    QSqlQuery p(db());
-    p.prepare(QStringLiteral(
-        "INSERT OR REPLACE INTO note_positions (note_id,screen_key,x,y,w,h) VALUES (?,?,?,?,?,?)"));
-    p.addBindValue(id);
-    p.addBindValue(screenKey);
-    p.addBindValue(x);
-    p.addBindValue(y);
-    p.addBindValue(w);
-    p.addBindValue(h);
-    if (!p.exec())
-        qWarning() << "Storage::saveNotePlacement:" << p.lastError().text();
+    if (!screenKey.isEmpty()) {
+        QSqlQuery p(database);
+        p.prepare(QStringLiteral(
+            "INSERT OR REPLACE INTO note_positions (note_id,screen_key,x,y,w,h) VALUES (?,?,?,?,?,?)"));
+        p.addBindValue(id);
+        p.addBindValue(screenKey);
+        p.addBindValue(x);
+        p.addBindValue(y);
+        p.addBindValue(w);
+        p.addBindValue(h);
+        if (!p.exec()) {
+            ok = false;
+            qWarning() << "Storage::saveNotePlacement:" << p.lastError().text();
+        }
+    }
+
+    if (inTransaction) {
+        if (ok)
+            database.commit();
+        else
+            database.rollback();
+    }
 }
 
 QRect Storage::notePosition(qint64 id, const QString &screenKey) const

@@ -76,7 +76,8 @@ constexpr int kMaxImageSide = 900;
 /// Key that identifies a monitor: its resolution plus the connector name, e.g.
 /// "2560x1440|DP-3". The resolution alone would collide between two identical
 /// monitors; the connector distinguishes them (stable as long as the monitor
-/// stays on the same port).
+/// stays on the same port). This is the only place that builds the key: the
+/// database stores it as an opaque string.
 QString screenKeyOf(const QScreen *s)
 {
     if (!s)
@@ -733,7 +734,7 @@ void NoteWindow::placeOnScreens(bool proportional, bool forceEmit)
 
     const int oldX = m_note.x, oldY = m_note.y, oldW = m_note.w, oldH = m_note.h;
     const QString oldKey = m_screenKey;
-    const int h = m_collapsed ? kTitleHeight : m_note.h;
+    int h = m_collapsed ? kTitleHeight : m_note.h;
     const QSize noteSize(m_note.w, h);
 
     // Reference screen: the one the note is on (if still connected), otherwise
@@ -792,14 +793,16 @@ void NoteWindow::placeOnScreens(bool proportional, bool forceEmit)
         }
     }
 
-    const int hh = m_collapsed ? kTitleHeight : m_note.h;
+    // A restored per-screen position may carry a different height: refresh the
+    // one used by the final clamp (the mapping above used the current one).
+    h = m_collapsed ? kTitleHeight : m_note.h;
     if (proportional) {
         // Guarantee the whole note is reachable again (its left/top part when
         // the note is wider/taller than the screen).
         m_note.x = qBound(targetRel.left(), m_note.x,
                           targetRel.left() + qMax(0, targetRel.width() - m_note.w));
         m_note.y = qBound(targetRel.top(), m_note.y,
-                          targetRel.top() + qMax(0, targetRel.height() - hh));
+                          targetRel.top() + qMax(0, targetRel.height() - h));
     } else {
         const int keep = 60;   // how many pixels of the note always stay reachable
         m_note.x = qBound(targetRel.left() - m_note.w + keep, m_note.x, targetRel.right() - keep);

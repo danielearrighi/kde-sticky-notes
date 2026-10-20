@@ -178,7 +178,16 @@ void SettingsTab::buildUi()
     root->addWidget(themesBox, 1);
 
     // --- connections ---
-    auto persist = [this] {
+    // Writes a single setting. Only the key that actually changed is written
+    // (the editable font combo emits on every typed character), and
+    // settingsChanged lets the app follow it immediately.
+    auto save = [this](const QString &key, const QString &value) {
+        Storage::instance().setSetting(key, value);
+        emit settingsChanged();
+    };
+    // Rewrites every key; used before the language-change relaunch, when the
+    // process is about to exit anyway.
+    auto persistAll = [this] {
         Storage::instance().setSetting(QStringLiteral("language"), m_language->currentData().toString());
         Storage::instance().setSetting(QStringLiteral("default_theme"), m_defaultTheme->currentData().toString());
         Storage::instance().setSetting(QStringLiteral("default_layer"), m_defaultLayer->currentData().toString());
@@ -195,26 +204,46 @@ void SettingsTab::buildUi()
     // currentIndexChanged does not fire when the user re-selects the already
     // active item (e.g. the first theme, shown as preselected): in that case the
     // value would not be saved. activated also covers re-selection.
-    connect(m_language, &QComboBox::activated, this, persist);
-    connect(m_defaultTheme, &QComboBox::activated, this, persist);
-    connect(m_defaultLayer, &QComboBox::activated, this, persist);
-    connect(m_defaultWidth, &QSpinBox::valueChanged, this, persist);
-    connect(m_defaultHeight, &QSpinBox::valueChanged, this, persist);
-    connect(m_fontFamily, &QComboBox::currentTextChanged, this, persist);
-    connect(m_fontSize, &QSpinBox::valueChanged, this, persist);
-    connect(m_dateFormat, &QLineEdit::textChanged, this, [this, persist] {
-        persist();
+    connect(m_language, &QComboBox::activated, this, [this, save] {
+        save(QStringLiteral("language"), m_language->currentData().toString());
+    });
+    connect(m_defaultTheme, &QComboBox::activated, this, [this, save] {
+        save(QStringLiteral("default_theme"), m_defaultTheme->currentData().toString());
+    });
+    connect(m_defaultLayer, &QComboBox::activated, this, [this, save] {
+        save(QStringLiteral("default_layer"), m_defaultLayer->currentData().toString());
+    });
+    connect(m_defaultWidth, &QSpinBox::valueChanged, this, [save](int value) {
+        save(QStringLiteral("default_width"), QString::number(value));
+    });
+    connect(m_defaultHeight, &QSpinBox::valueChanged, this, [save](int value) {
+        save(QStringLiteral("default_height"), QString::number(value));
+    });
+    connect(m_fontFamily, &QComboBox::currentTextChanged, this, [save](const QString &text) {
+        save(QStringLiteral("font_family"), text);
+    });
+    connect(m_fontSize, &QSpinBox::valueChanged, this, [save](int value) {
+        save(QStringLiteral("font_size"), QString::number(value));
+    });
+    connect(m_dateFormat, &QLineEdit::textChanged, this, [this, save](const QString &text) {
+        save(QStringLiteral("date_format"), text.trimmed());
         // The date/time format also shows in the trash: request a redraw.
         emit dateFormatChanged();
     });
-    connect(m_autostart, &QCheckBox::toggled, this, persist);
-    connect(m_confirmDelete, &QCheckBox::toggled, this, persist);
-    connect(m_closeToTray, &QCheckBox::toggled, this, persist);
+    connect(m_autostart, &QCheckBox::toggled, this, [save](bool checked) {
+        save(QStringLiteral("autostart"), checked ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    connect(m_confirmDelete, &QCheckBox::toggled, this, [save](bool checked) {
+        save(QStringLiteral("confirm_delete"), checked ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    connect(m_closeToTray, &QCheckBox::toggled, this, [save](bool checked) {
+        save(QStringLiteral("close_to_tray"), checked ? QStringLiteral("1") : QStringLiteral("0"));
+    });
 
     // Language change needs a restart: save and relaunch with "--restart" so the
     // new process skips the single-instance probe.
-    connect(m_restart, &QPushButton::clicked, this, [this, persist] {
-        persist();
+    connect(m_restart, &QPushButton::clicked, this, [this, persistAll] {
+        persistAll();
         QProcess::startDetached(QCoreApplication::applicationFilePath(),
                                 {QStringLiteral("--restart")});
         QCoreApplication::quit();
@@ -404,11 +433,11 @@ void SettingsTab::restoreCurrentTheme()
 
 void SettingsTab::loadIntoUi()
 {
-    // Widgets emit signals while being populated: without blocking, the
-    // transient values would be written back to the settings (clobbering).
-    QSignalBlocker bTheme(m_defaultTheme);
-    QSignalBlocker bLayer(m_defaultLayer);
-    QSignalBlocker bLanguage(m_language);
+    // Widgets that emit when set programmatically are blocked while being
+    // populated: without blocking, the transient values would be written back to
+    // the settings (clobbering). The language/default-theme/default-layer combos
+    // are connected to activated (user interaction only), so they need no
+    // blocker.
     QSignalBlocker bWidth(m_defaultWidth);
     QSignalBlocker bHeight(m_defaultHeight);
     QSignalBlocker bFont(m_fontFamily);
