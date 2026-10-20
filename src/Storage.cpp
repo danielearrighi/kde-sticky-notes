@@ -224,29 +224,6 @@ qint64 Storage::insertNote(Note n)
     return q.lastInsertId().toLongLong();
 }
 
-void Storage::updateNote(const Note &n)
-{
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral(
-        "UPDATE notes SET title=?,content=?,theme=?,x=?,y=?,w=?,h=?,layer=?,visible=?,collapsed=?,scroll=?,opacity=?,updated_at=?"
-        " WHERE id=?"));
-    q.addBindValue(bindText(n.title));
-    q.addBindValue(bindText(n.content));
-    q.addBindValue(bindText(n.themeId));
-    q.addBindValue(n.x);
-    q.addBindValue(n.y);
-    q.addBindValue(n.w);
-    q.addBindValue(n.h);
-    q.addBindValue(bindText(n.layer));
-    q.addBindValue(n.visible ? 1 : 0);
-    q.addBindValue(n.collapsed ? 1 : 0);
-    q.addBindValue(n.scroll);
-    q.addBindValue(qBound(10, n.opacity, 100));
-    q.addBindValue(nowIso());
-    q.addBindValue(n.id);
-    q.exec();
-}
-
 void Storage::updateContent(qint64 id, const QString &title, const QString &content)
 {
     QSqlQuery q(db());

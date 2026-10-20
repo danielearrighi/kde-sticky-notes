@@ -23,7 +23,6 @@ public:
     QList<Note> notes(bool includeDeleted = false) const;
     Note note(qint64 id) const;
     qint64 insertNote(Note n);
-    void updateNote(const Note &n);
     void updateContent(qint64 id, const QString &title, const QString &content);
     void updateGeometry(qint64 id, int x, int y, int w, int h);
     /// Persists the geometry and records it under \a screenKey (per-screen

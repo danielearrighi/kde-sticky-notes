@@ -34,7 +34,6 @@
 #include <QUrl>
 #include <QMouseEvent>
 #include <QResizeEvent>
-#include <QFocusEvent>
 #include <QTextListFormat>
 #include <QTextList>
 #include <QTextBlock>
@@ -108,25 +107,6 @@ QScreen *screenForKey(const QString &key, const QList<QScreen *> &screens)
         if (screenKeyOf(s) == key)
             return s;
     return nullptr;
-}
-
-QIcon colorIcon(const QString &hex)
-{
-    QPixmap pm(14, 14);
-    pm.fill(Qt::transparent);
-    QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setBrush(QColor(hex));
-    p.setPen(QPen(QColor("#00000055")));
-    p.drawRoundedRect(QRectF(1, 1, 12, 12), 3, 3);
-    p.end();
-    return QIcon(pm);
-}
-
-QString themeColor(const QString &id, const QString &fallback)
-{
-    const Theme t = Storage::instance().theme(id);
-    return t.isValid() ? t.body : fallback;
 }
 
 /// Pixel size of the image referenced by \a name, read from the image header
@@ -600,10 +580,13 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     // From now on URLs typed or pasted are recognized; doing it during the
     // Markdown import would interfere with QTextDocument::setMarkdown().
     static_cast<NoteBodyEdit *>(m_body)->setLinkifyEnabled(true);
-    m_loading = false;
 
     refreshTitleLabel();
+    // applyStyle() recolors the document; keep m_loading set so that this
+    // formatting pass does not start a save of the just-loaded content.
     applyTheme(m_note.themeId);
+    m_body->document()->clearUndoRedoStacks();
+    m_loading = false;
     applyOpacity();
 
     // Saved collapsed state: restore the appearance (applySize() applies the height).
@@ -1073,6 +1056,15 @@ void NoteWindow::applyStyle()
     fmt.setForeground(QColor(m_theme.text));
     m_body->setCurrentCharFormat(fmt);
 
+    // The format above only affects newly typed text, and the stylesheet only
+    // the text without an explicit foreground: recolor what is already in the
+    // document (e.g. after a theme change). A merge keeps bold/italic/links.
+    QTextCursor all(m_body->document());
+    all.select(QTextCursor::Document);
+    QTextCharFormat fg;
+    fg.setForeground(QColor(m_theme.text));
+    all.mergeCharFormat(fg);
+
     // The note background is painted by hand from m_theme (see paintCard()):
     // force a repaint so a theme change is reflected right away.
     m_card->update();
@@ -1354,8 +1346,6 @@ bool NoteWindow::eventFilter(QObject *watched, QEvent *event)
         return false;   // keep normal event delivery
     }
 
-    if (watched == m_titleEdit && event->type() == QEvent::FocusOut)
-        commitTitleEdit();
     return QWidget::eventFilter(watched, event);
 }
 
@@ -1664,7 +1654,7 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     menu.addSeparator();
     QMenu *colors = menu.addMenu(I18n::t(QStringLiteral("note.color")));
     for (const Theme &t : Storage::instance().themes()) {
-        QAction *a = colors->addAction(colorIcon(t.body), Themes::displayName(t));
+        QAction *a = colors->addAction(UiHelpers::swatchIcon(t.body), Themes::displayName(t));
         a->setCheckable(true);
         a->setChecked(t.id == m_note.themeId);
         const QString id = t.id;

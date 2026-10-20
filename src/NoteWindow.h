@@ -35,6 +35,9 @@ public:
     void applyTheme(const QString &themeId);
     void applyLayer(const QString &layer);
     void setVisibleState(bool visible);
+    /// The layer the note is configured to live on ("top" or "bottom"), not the
+    /// layer it may be raised to temporarily while focused: the menu entry
+    /// toggles this persistent setting.
     bool isAlwaysOnTop() const { return m_note.layer == QLatin1String("top"); }
 
     /// Brings the note back into focus and to the front.

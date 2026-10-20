@@ -474,4 +474,10 @@ void SettingsTab::loadIntoUi()
             }
     if (!m_themeList->currentItem() && m_themeList->count() > 0)
         m_themeList->setCurrentRow(0);
+
+    // The list was populated under QSignalBlocker, so currentItemChanged never
+    // fired: load the highlighted theme explicitly, otherwise the editor stays
+    // empty (and "save" does nothing) until the user clicks another theme.
+    if (QListWidgetItem *cur = m_themeList->currentItem())
+        loadThemeIntoEditor(cur->data(Qt::UserRole).toString());
 }
