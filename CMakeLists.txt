@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(sticky-notes VERSION 0.2.6 LANGUAGES CXX)
+project(sticky-notes VERSION 0.2.8 LANGUAGES CXX)
 
 # Version.h is generated from the project() VERSION above: bump that single line
 # to release a new version. The header is what the app reads at build time
