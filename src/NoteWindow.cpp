@@ -657,6 +657,16 @@ void NoteWindow::configureLayerShell()
     m_layer->setAnchors(LS::Anchors::fromInt(int(LS::AnchorTop) | int(LS::AnchorLeft)));
 }
 
+void NoteWindow::commitLayerSurface()
+{
+    // setMargins()/setLayer()/setKeyboardInteractivity() are double-buffered:
+    // only a wl_surface commit applies them. Declare the whole surface, so the
+    // commit is valid for any compositor. During a drag the card is hidden and
+    // frozen into m_dragSnapshot (beginDragVisuals()), hence this full repaint
+    // is a blit plus the shadow, not a body repaint.
+    update();
+}
+
 void NoteWindow::applyMargins()
 {
     if (m_layer) {
@@ -674,17 +684,15 @@ void NoteWindow::applyMargins()
         // widget does not redraw, so the window does not move until something
         // else (e.g. a click) triggers a redraw that commits it.
         //
-        // We only dirty a corner of the transparent shadow border, not the
-        // whole note: this is enough for QtWayland to render and commit the
-        // surface. A full update() would repaint the body too, and with an
-        // image inside it that repaint costs far more than a frame. The
-        // surface would then lag several pointer events behind: the local
-        // coordinate keeps growing from the press point and the fixed
-        // reference in mouseMoveEvent() sums the delta again on every event,
-        // making the note jump around (the same "explosion" as when nothing
-        // commits at all). Moving does not change the note content, so a
-        // minimal damage is enough — the compositor moves the existing buffer.
-        update(QRect(0, 0, kShadowMargin, kShadowMargin));
+        // We commit the whole surface on purpose: the damage size does not move
+        // the surface (any commit applies the new margin) and a commit whose
+        // damage does not cover the moved surface is fragile. The full repaint
+        // stays cheap during a drag because the card is replaced by
+        // m_dragSnapshot (see beginDragVisuals()): it costs a blit plus the
+        // shadow, even for a note holding a large image, so the surface keeps
+        // up with the pointer and the fixed-reference math in mouseMoveEvent()
+        // remains valid. Moving does not change the note content.
+        commitLayerSurface();
     }
 }
 
@@ -847,9 +855,9 @@ void NoteWindow::applyEffectiveLayer()
     m_layer->setLayer(wanted);
 
     // The layer is double-buffered too: as with the margin in applyMargins(),
-    // without a wl_surface commit the compositor does not apply it. update()
-    // forces it (QtWayland translates it into a commit).
-    update();
+    // without a wl_surface commit the compositor does not apply it. Use the
+    // single commit helper.
+    commitLayerSurface();
 }
 
 void NoteWindow::setKeyboardInteractive(bool interactive)
@@ -863,10 +871,9 @@ void NoteWindow::setKeyboardInteractive(bool interactive)
         return;
     m_layer->setKeyboardInteractivity(mode);
 
-    // The keyboard interactivity is double-buffered as well: force a commit
-    // with the same minimal damage used by applyMargins() (a full update() would
-    // repaint the body, images included).
-    update(QRect(0, 0, kShadowMargin, kShadowMargin));
+    // The keyboard interactivity is double-buffered as well: commit the whole
+    // surface through the single helper (see commitLayerSurface()).
+    commitLayerSurface();
 }
 
 void NoteWindow::requestKeyboardFocus()
@@ -946,6 +953,11 @@ void NoteWindow::setVisibleState(bool visible)
         // Hidden: no focus possible, return to the configured layer.
         m_focusLayerTimer->stop();
         m_raisedForFocus = false;
+        m_dragging = false;
+        m_resizing = false;
+        unsetCursor();
+        m_dragRestoreBodyFocus = false;
+        endDragVisuals();
         setKeyboardInteractive(false);
         applyEffectiveLayer();
         persistScroll();
@@ -1080,9 +1092,8 @@ void NoteWindow::applyOpacity()
     // client-side. The effect is applied to the card, not to the window: the
     // background, the text and the pasted images are composited together and
     // then faded (a real group opacity), while dragging keeps working because
-    // NoteWindow::applyMargins() only damages the shadow corner and does not
-    // repaint the card (with a top-level effect every partial update would
-    // re-render the whole note, images included).
+    // during a drag the card is frozen into m_dragSnapshot and the full-surface
+    // commit only blits it (see beginDragVisuals()).
     if (opacity >= 1.0) {
         if (m_card->graphicsEffect())
             m_card->setGraphicsEffect(nullptr);
@@ -1294,6 +1305,15 @@ void NoteWindow::paintEvent(QPaintEvent *event)
         p.setBrush(QColor(0, 0, 0, alpha));
         p.drawRoundedRect(card.adjusted(-i, -i, i, i), kCornerRadius + i, kCornerRadius + i);
     }
+
+    // During a drag the card is hidden and frozen into m_dragSnapshot, so the
+    // full-surface commit costs a blit instead of a body repaint (see
+    // beginDragVisuals()). The snapshot is captured without the card opacity
+    // effect, so apply the opacity here once, like for the shadow.
+    if (!m_dragSnapshot.isNull()) {
+        p.setOpacity(opacity);
+        p.drawPixmap(kShadowMargin, kShadowMargin, m_dragSnapshot);
+    }
 }
 
 void NoteWindow::paintCard(QPainter &p)
@@ -1341,12 +1361,57 @@ bool NoteWindow::eventFilter(QObject *watched, QEvent *event)
     // configureLayerShell()). The press is caught on the QWindow, before
     // QWidgetWindow dispatches it to the body/title bar/buttons.
     if (watched == windowHandle() && event->type() == QEvent::MouseButtonPress) {
+        // Remember whether the body has the keyboard BEFORE the press moves the
+        // focus to the note: hiding the card for the drag snapshot takes it
+        // away, and endDragVisuals() gives it back (see beginDragVisuals()).
+        m_dragRestoreBodyFocus = m_body->hasFocus();
         if (!isActiveWindow())
             requestKeyboardFocus();
         return false;   // keep normal event delivery
     }
 
     return QWidget::eventFilter(watched, event);
+}
+
+void NoteWindow::beginDragVisuals()
+{
+    if (!m_dragSnapshot.isNull())
+        return;
+    // QWidget::grab() on a widget carrying a QGraphicsEffect renders the effect
+    // source in device coordinates: the returned pixmap has the card content
+    // shifted by the card position in the window and its right/bottom edge cut
+    // (visible as a shrinking note with missing borders while dragging). Remove
+    // the opacity effect for the grab; paintEvent() applies the opacity to the
+    // snapshot, and applyOpacity() recreates the effect on the card.
+    const bool hadEffect = m_card->graphicsEffect() != nullptr;
+    if (hadEffect)
+        m_card->setGraphicsEffect(nullptr);   // deletes the effect
+    m_dragSnapshot = m_card->grab();          // DPR-aware: drawn as-is
+    if (hadEffect)
+        applyOpacity();                       // restore the card fade
+    if (m_dragSnapshot.isNull())
+        return;          // fallback: the card stays visible
+    m_card->hide();      // paintEvent() draws the snapshot instead
+    update();
+}
+
+void NoteWindow::endDragVisuals()
+{
+    if (m_dragSnapshot.isNull())
+        return;
+    m_dragSnapshot = QPixmap();
+    m_card->show();
+    // Hiding the card took the focus away from the body: give the caret back,
+    // so typing can continue right after the drag.
+    if (m_dragRestoreBodyFocus) {
+        m_dragRestoreBodyFocus = false;
+        // Hiding the card may also have dropped the window activation: ask for
+        // it again before giving the keyboard back to the body.
+        if (!isActiveWindow())
+            requestKeyboardFocus();
+        m_body->setFocus();
+    }
+    update();
 }
 
 void NoteWindow::mousePressEvent(QMouseEvent *event)
@@ -1390,16 +1455,23 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
         unsetCursor();
         clampToScreen();
         applyMargins();
+        endDragVisuals();
         if (wasDragging)
             emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h, m_screenKey);
     }
 
     if (m_dragging) {
+        // Freeze the card on the first real movement only (a click or the first
+        // click of a double click must not pay the grab nor flicker).
+        if (m_dragSnapshot.isNull())
+            beginDragVisuals();
+
         // LOCAL coordinate with a FIXED reference to the grab point: on Wayland
         // it is the only reliable one. For it to work, the surface must REALLY
-        // move on every event: applyMargins() forces the commit (update()),
-        // otherwise the surface stays still, the local coordinate keeps
-        // growing and the delta accumulates until it "explodes". See applyMargins().
+        // move on every event: applyMargins() forces a full commit
+        // (commitLayerSurface()), otherwise the surface stays still, the local
+        // coordinate keeps growing and the delta accumulates until it
+        // "explodes". See applyMargins().
         const QPoint delta = pos - m_dragRefLocal;
         if (!delta.isNull()) {
             m_note.x += delta.x();
@@ -1429,6 +1501,7 @@ void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
         unsetCursor();
         clampToScreen();
         applyMargins();
+        endDragVisuals();
         emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h, m_screenKey);
     } else if (m_resizing) {
         m_resizing = false;

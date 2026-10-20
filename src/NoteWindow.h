@@ -3,6 +3,7 @@
 #include "Models.h"
 
 #include <QWidget>
+#include <QPixmap>
 #include <QPoint>
 #include <QSize>
 
@@ -90,6 +91,17 @@ private:
     void applySize();
     void clampToScreen();
 
+    /// Commits the whole wl_surface, applying the double-buffered layer-shell
+    /// state (margins, layer, keyboard interactivity). During a drag the card is
+    /// frozen into m_dragSnapshot, so the full repaint is a blit plus the
+    /// shadow (see beginDragVisuals()).
+    void commitLayerSurface();
+    /// Freezes the card into m_dragSnapshot and hides it, so the full-surface
+    /// commit forced on every drag movement does not repaint the body.
+    void beginDragVisuals();
+    /// Drops the snapshot and shows the card again (end of drag).
+    void endDragVisuals();
+
     /// Places the note on a connected screen and updates m_screenKey /
     /// m_screenRect. With \a proportional a note that ends up on a different
     /// screen keeps its relative position (or its saved per-screen position),
@@ -169,6 +181,12 @@ private:
 
     LayerShellQt::Window *m_layer = nullptr;
     QWidget *m_card = nullptr;
+    /// Card content frozen while dragging (see beginDragVisuals()). Null when
+    /// not dragging.
+    QPixmap m_dragSnapshot;
+    /// Whether the body had keyboard focus when the drag started: hiding the
+    /// card would drop it, so it is restored on release.
+    bool m_dragRestoreBodyFocus = false;
     QWidget *m_titleBar = nullptr;
     QLabel *m_titleLabel = nullptr;
     QLineEdit *m_titleEdit = nullptr;

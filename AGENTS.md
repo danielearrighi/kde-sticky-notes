@@ -73,12 +73,21 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   `QString` directly stores SQL `NULL` and violates `NOT NULL` on `notes.title`.
   Use/keep this helper for text columns.
 - Layer-shell state (including margins) is double-buffered and
-  `LayerShellQt::Window::setMargins()` does **not** commit. `NoteWindow::applyMargins()`
-  forces a `wl_surface` commit by dirtying a corner of the shadow border only
-  (`update(QRect(...))`, **not** a full `update()`). Remove that and drag positions
-  explode; make it a full repaint and a note holding an image explodes instead
-  (the slow body repaint makes the surface lag the pointer). Drag math must use
-  the **local** coordinate incrementally with a fixed press reference (see
+  `LayerShellQt::Window::setMargins()` does **not** commit.
+  `NoteWindow::commitLayerSurface()` is the single place that forces a
+  full-surface `wl_surface` commit (`update()`), used by `applyMargins()`,
+  `applyEffectiveLayer()` and `setKeyboardInteractive()`. The full repaint stays
+  cheap during a drag because `beginDragVisuals()` freezes the card into
+  `m_dragSnapshot` and hides it on the first real movement, so `paintEvent()`
+  draws the snapshot plus the shadow. Do not remove that snapshot: a body repaint
+  on every movement makes the surface lag the pointer and drag positions explode.
+  The snapshot is grabbed with the card's `QGraphicsOpacityEffect` temporarily
+  removed: Qt renders the effect source in device coordinates, so grabbing a
+  faded card returns the content shifted by its position and cut at the
+  right/bottom. Hiding the card would also take the keyboard focus from the body:
+  `eventFilter()` records whether the body had focus before the press moves it,
+  and `endDragVisuals()` gives it back. Drag math must use the **local**
+  coordinate incrementally with a fixed press reference (see
   `NoteWindow::mouseMoveEvent()`), never `globalPosition()` as an absolute base.
 - Notes are layer-shell surfaces with keyboard interactivity **None** unless the
   user interacts with them: `NoteWindow::requestKeyboardFocus()` enables
@@ -100,3 +109,6 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
 - The hub is split per tab: open/attach only the tab you are working on
   (`src/tabs/NotesTab`, `TrashTab`, `SettingsTab` or `InfoTab`)
   instead of `HubWindow.cpp`, which is now a thin shell.
+- Do not take screenshot or start a infinite set of test (creating test app versions) 
+  tring to test/fix something all by yourself. If something is not clear, analyze it,
+  try a possibile fix and ask the user to test for you. 
