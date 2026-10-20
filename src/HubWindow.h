@@ -28,6 +28,8 @@ signals:
     void purgeNoteRequested(qint64 id);
     void purgeAllRequested();
     void settingsChanged();
+    /// A backup is about to be restored: open notes must flush pending edits.
+    void flushPendingContent();
     /// A backup was restored: the current notes were replaced.
     void backupRestored();
     void quitRequested();

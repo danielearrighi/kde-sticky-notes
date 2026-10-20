@@ -46,6 +46,7 @@ private slots:
     void onPurgeNote(qint64 id);
     void onPurgeAll();
     void onSettingsChanged();
+    void onFlushPendingContent();
     void onBackupRestored();
     void onQuitRequested();
     void relayoutNotesOnScreens();

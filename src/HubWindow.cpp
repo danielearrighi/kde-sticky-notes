@@ -43,7 +43,9 @@ HubWindow::HubWindow(QWidget *parent)
     connect(m_settings, &SettingsTab::settingsChanged, m_notes, &NotesTab::updateQuitButton);
     // The trash dates use the date/time format: refresh them right away.
     connect(m_settings, &SettingsTab::dateFormatChanged, m_trash, &TrashTab::refresh);
-    // Restoring a backup replaces the notes: forward it so the app rebuilds.
+    // Restoring a backup replaces the notes: let the app flush pending edits,
+    // then forward the signal so it rebuilds the windows.
+    connect(m_settings, &SettingsTab::flushPendingContent, this, &HubWindow::flushPendingContent);
     connect(m_settings, &SettingsTab::backupRestored, this, &HubWindow::backupRestored);
 
     refresh();

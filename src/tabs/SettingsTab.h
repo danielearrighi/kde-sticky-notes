@@ -25,6 +25,9 @@ signals:
     void settingsChanged();
     /// Emitted when the date/time format changed: the trash dates must be redrawn.
     void dateFormatChanged();
+    /// Emitted right before restoring a backup: open notes must persist any
+    /// debounced edit, otherwise the import would drop it.
+    void flushPendingContent();
     /// Emitted after a backup has been restored: the notes changed under the
     /// app's feet, so open windows must be rebuilt.
     void backupRestored();

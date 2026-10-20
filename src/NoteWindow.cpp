@@ -589,12 +589,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     connect(m_closeButton, &QToolButton::clicked, this, [this] {
         emit deleteRequested(m_note.id);
     });
-    connect(m_saveTimer, &QTimer::timeout, this, [this] {
-        if (m_loading)
-            return;
-        m_note.content = m_body->document()->toMarkdown();
-        emit contentEdited(m_note.id, m_note.title, m_note.content);
-    });
+    connect(m_saveTimer, &QTimer::timeout, this, &NoteWindow::saveContent);
     connect(m_focusLayerTimer, &QTimer::timeout, this, &NoteWindow::onFocusLayerTimeout);
 
     // content
@@ -638,6 +633,9 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
 
 NoteWindow::~NoteWindow()
 {
+    // The debounced save timer dies with the window: persist any pending edit
+    // first (e.g. the note is deleted to the trash before the timer fires).
+    flushPendingSave();
     if (m_layer)
         m_layer->deleteLater();
 }
@@ -1138,6 +1136,22 @@ void NoteWindow::commitTitleEdit()
 void NoteWindow::scheduleSaveContent()
 {
     m_saveTimer->start();
+}
+
+void NoteWindow::saveContent()
+{
+    if (m_loading)
+        return;
+    m_note.content = m_body->document()->toMarkdown();
+    emit contentEdited(m_note.id, m_note.title, m_note.content);
+}
+
+void NoteWindow::flushPendingSave()
+{
+    if (m_loading || !m_saveTimer->isActive())
+        return;
+    m_saveTimer->stop();
+    saveContent();
 }
 
 // --------------------------------------------------------------- images

@@ -50,6 +50,11 @@ public:
     /// incrementally (see NoteWindow.cpp).
     void persistScroll();
 
+    /// Saves the body now if a debounced save is still pending. Idempotent:
+    /// called from the destructor, on quit and before a backup restore, so no
+    /// typed text is lost.
+    void flushPendingSave();
+
 signals:
     void contentEdited(qint64 id, const QString &title, const QString &content);
     void geometryEdited(qint64 id, int x, int y, int w, int h, const QString &screenKey);
@@ -103,6 +108,8 @@ private:
     void beginTitleEdit();
     void commitTitleEdit();
     void scheduleSaveContent();
+    /// Persists the body immediately (used by the debounced m_saveTimer).
+    void saveContent();
     void buildContextMenu(const QPoint &globalPos);
 
     /// Inserts \a image at the cursor as a PNG data URL (see the note about

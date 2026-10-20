@@ -306,6 +306,9 @@ void SettingsTab::doRestore()
         return;
 
     QString error;
+    // The restore replaces the whole database: let the open notes persist any
+    // edit still waiting for the debounced save, so it is not lost.
+    emit flushPendingContent();
     if (!Storage::instance().importBackup(path, true, &error)) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("backup.dialog_title")),
                              I18n::t(QStringLiteral("backup.restore_failed")).arg(error));

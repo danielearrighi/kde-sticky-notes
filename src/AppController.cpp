@@ -100,6 +100,7 @@ void AppController::start(bool startHidden)
     connect(m_hub, &HubWindow::purgeNoteRequested, this, &AppController::onPurgeNote);
     connect(m_hub, &HubWindow::purgeAllRequested, this, &AppController::onPurgeAll);
     connect(m_hub, &HubWindow::settingsChanged, this, &AppController::onSettingsChanged);
+    connect(m_hub, &HubWindow::flushPendingContent, this, &AppController::onFlushPendingContent);
     connect(m_hub, &HubWindow::backupRestored, this, &AppController::onBackupRestored);
     connect(m_hub, &HubWindow::quitRequested, this, &AppController::onQuitRequested);
 
@@ -124,11 +125,14 @@ void AppController::start(bool startHidden)
     for (QScreen *s : QGuiApplication::screens())
         connectScreen(s);
 
-    // The scroll position is not tracked incrementally: flush it for every
-    // open note right before the app exits.
+    // The scroll position is not tracked incrementally and the body content is
+    // saved with a debounce: flush both for every open note right before the
+    // app exits (the event loop no longer runs timers after quit()).
     connect(QApplication::instance(), &QCoreApplication::aboutToQuit, this, [this] {
-        for (NoteWindow *w : std::as_const(m_windows))
+        for (NoteWindow *w : std::as_const(m_windows)) {
+            w->flushPendingSave();
             w->persistScroll();
+        }
     });
 
     for (const Note &n : Storage::instance().notes(false))
@@ -399,6 +403,12 @@ void AppController::onSettingsChanged()
         w->applyTheme(Storage::instance().note(w->noteId()).themeId);
     applyAutostart();
     updateTrayVisibility();
+}
+
+void AppController::onFlushPendingContent()
+{
+    for (NoteWindow *w : std::as_const(m_windows))
+        w->flushPendingSave();
 }
 
 void AppController::onBackupRestored()
