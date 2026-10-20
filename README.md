@@ -90,7 +90,7 @@ rm -f ~/.local/bin/sticky-notes \
 - **Autostart and tray** — start the notes at login; optionally keep the app
   running in the system tray when the hub is closed.
 - **Single instance** — launching the app again just brings the hub to the front.
-- **Languages** — Multilanguage (only English, Italian for now)
+- **Languages** — English, Italian and Spanish
 
 ![Sticky Notes: Settings window](screens/settings.png)
 

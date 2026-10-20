@@ -64,7 +64,7 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   `settings.*`, `colors.*`). Values contain **no HTML**: bold/italic are applied in
   C++ with `QFont`. Translations live in `resources/i18n/*.json` (one flat
   symbolic-key → value map per language, English source/fallback in `en.json`,
-  Italian in `it.json`), embedded as Qt resources and loaded at runtime by `I18n`.
+  Italian in `it.json`, Spanish in `es.json`), embedded as Qt resources and loaded at runtime by `I18n`.
   `en.json` is **always installed as the base translator**; the selected language
   is installed on top, so a missing key falls back to English. Files under `docs/`
   stay Italian. To add a language: drop `resources/i18n/<code>.json` with a `_meta`
