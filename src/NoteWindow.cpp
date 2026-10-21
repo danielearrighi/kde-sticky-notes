@@ -496,6 +496,18 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(kShadowMargin, kShadowMargin, kShadowMargin, kShadowMargin);
     root->setSpacing(0);
+    // The minimum size of the window must come from the note (kMinW/kMinH), not
+    // from the content: by default the layout exports its own minimum to the
+    // window, and the title QLabel reports the whole text width as its minimum,
+    // so a long title would stop the note from being narrowed. Worse, the
+    // layer-shell wish (setDesiredSize()) and the clamped window size would
+    // alternate: the compositor reconfigures the surface to the size asked by
+    // the client, the widget refuses it and commits a bigger buffer, and so on
+    // -> the note's width flashes while being resized. Keep the layout out of
+    // the window size (the surface is sized by applySize()) and declare the same
+    // floor the resize math enforces.
+    root->setSizeConstraint(QLayout::SetNoConstraint);
+    setMinimumSize(kMinW + 2 * kShadowMargin, kTitleHeight + 2 * kShadowMargin);
 
     // The card holds the title bar and the body and paints their background;
     // the opacity effect is applied to it as a whole (see applyOpacity()).
@@ -519,6 +531,11 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_titleLabel = new QLabel(m_titleBar);
     m_titleLabel->setTextInteractionFlags(Qt::NoTextInteraction);
     m_titleLabel->setObjectName(QStringLiteral("titleText"));
+    // The title never dictates the note width: it is elided to the space the
+    // label gets (see elideTitle()), while the size policy keeps its text out
+    // of the layout minimum.
+    m_titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_titleLabel->installEventFilter(this);   // re-elide when it is resized
 
     m_titleEdit = new QLineEdit(m_titleBar);
     m_titleEdit->setObjectName(QStringLiteral("titleEdit"));
@@ -1046,8 +1063,23 @@ void NoteWindow::refreshTitleLabel()
 {
     const QString t = m_note.title.trimmed();
     m_titleLabel->setText(t.isEmpty() ? UiHelpers::untitled() : t);
+    elideTitle();
     if (m_titleEdit->isVisible())
         m_titleEdit->setText(m_note.title);
+}
+
+void NoteWindow::elideTitle()
+{
+    // The label shows the elided form of the full title, recomputed from
+    // m_note.title (never from the already elided text) whenever the label
+    // changes width or font. Keeping the full text in the note also means the
+    // title is not lost when the note is too narrow to show it.
+    const QString title = m_note.title.trimmed();
+    const QString full = title.isEmpty() ? UiHelpers::untitled() : title;
+    const QString shown = m_titleLabel->fontMetrics().elidedText(full, Qt::ElideRight,
+                                                                 m_titleLabel->width());
+    if (shown != m_titleLabel->text())
+        m_titleLabel->setText(shown);
 }
 
 void NoteWindow::applyTheme(const QString &themeId)
@@ -1119,6 +1151,7 @@ void NoteWindow::applyStyle()
     m_titleLabel->setFont(ft);
     m_titleEdit->setFont(ft);
     m_body->document()->setDefaultFont(f);
+    elideTitle();   // the new font may fit a different part of the title
 
     // the document text color follows the theme
     QTextCursor c = m_body->textCursor();
@@ -1415,6 +1448,14 @@ void NoteWindow::resizeEvent(QResizeEvent *event)
 
 bool NoteWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    // The layout gives the title whatever width is left once the buttons have
+    // theirs: elide the text to it, so a long title is cut with "..." instead of
+    // forcing the note wider (see elideTitle()).
+    if (watched == m_titleLabel && event->type() == QEvent::Resize) {
+        elideTitle();
+        return false;
+    }
+
     // A note is not a focus candidate until the user interacts with it (see
     // configureLayerShell()). The press is caught on the QWindow, before
     // QWidgetWindow dispatches it to the body/title bar/buttons.

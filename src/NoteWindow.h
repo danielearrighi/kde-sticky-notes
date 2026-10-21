@@ -168,6 +168,9 @@ private:
     bool titleBarContains(const QPoint &pos) const;
 
     void refreshTitleLabel();
+    /// Shows the title elided to the label width (the note width must not depend
+    /// on the title length, see the constructor and the resize flicker note).
+    void elideTitle();
     void beginTitleEdit();
     void commitTitleEdit();
     void scheduleSaveContent();

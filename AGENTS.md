@@ -89,6 +89,14 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   and `endDragVisuals()` gives it back. Drag math must use the **local**
   coordinate incrementally with a fixed press reference (see
   `NoteWindow::mouseMoveEvent()`), never `globalPosition()` as an absolute base.
+- The note minimum size comes from `kMinW`/`kMinH`, **never from the content**.
+  A `QLayout` exports its minimum to the window by default, and a title `QLabel`
+  reports the whole text width: a long title would raise the window's minimum
+  width. The layer-shell desired size (`applySize()`) is then smaller than the
+  size Qt allows, the surface keeps being reconfigured and the note flickers
+  while it is resized below the title width. Hence the root layout is
+  `SetNoConstraint`, the window has an explicit minimum and the title label is
+  `Ignored` horizontally and elided by `elideTitle()`.
 - Notes are layer-shell surfaces with keyboard interactivity **None** unless the
   user interacts with them: `NoteWindow::requestKeyboardFocus()` enables
   OnDemand on a mouse press or `activate()`, and `onFocusLayerTimeout()` resets
