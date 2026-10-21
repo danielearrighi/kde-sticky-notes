@@ -70,6 +70,8 @@
   "settings.confirm_delete": "Pedir confirmación antes de eliminar una nota",
   "settings.close_to_tray": "Cerrar a la bandeja del sistema",
   "settings.close_to_tray_tooltip": "Al cerrar la ventana o elegir «Salir de la aplicación», Sticky Notes sigue ejecutándose en la bandeja del sistema.",
+  "settings.snap": "Ajustar las notas al moverlas y redimensionarlas",
+  "settings.snap_tooltip": "Cuando el borde de una nota se encuentra con el de una nota cercana, la nota se detiene un momento para facilitar la alineación. Desactívalo para mover y redimensionar las notas libremente.",
   "settings.data_path": "Datos: %1",
   "settings.random_color": "Aleatorio (color aleatorio)",
   "settings.themes_title": "Temas (colores de las notas)",

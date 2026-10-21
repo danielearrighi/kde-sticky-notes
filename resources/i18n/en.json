@@ -70,6 +70,8 @@
   "settings.confirm_delete": "Ask for confirmation before deleting a note",
   "settings.close_to_tray": "Close to system tray",
   "settings.close_to_tray_tooltip": "Closing the window or choosing “Quit app” keeps Sticky Notes running in the system tray.",
+  "settings.snap": "Snap notes while moving and resizing",
+  "settings.snap_tooltip": "When a note edge meets the edge of a nearby note, the note pauses for a moment to help alignment. Disable to move and resize notes freely.",
   "settings.data_path": "Data: %1",
   "settings.random_color": "Random (random color)",
   "settings.themes_title": "Themes (note colors)",

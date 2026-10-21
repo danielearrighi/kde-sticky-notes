@@ -3,8 +3,11 @@
 #include "Models.h"
 
 #include <QWidget>
+#include <QElapsedTimer>
+#include <QList>
 #include <QPixmap>
 #include <QPoint>
+#include <QRect>
 #include <QSize>
 
 namespace LayerShellQt { class Window; }
@@ -33,9 +36,16 @@ public:
     qint64 noteId() const { return m_note.id; }
     const Note &note() const { return m_note; }
 
+    /// Global rectangle the note visibly occupies (the title bar alone when the
+    /// note is collapsed): used to compare its edges with the other notes.
+    QRect globalNoteRect() const;
+
     void applyTheme(const QString &themeId);
     void applyLayer(const QString &layer);
     void setVisibleState(bool visible);
+    /// Enables/disables the pause when an edge meets the edge of a nearby note
+    /// (both dragging and resizing). Disabling clears any hold in progress.
+    void setSnappingEnabled(bool enabled);
     /// The layer the note is configured to live on ("top" or "bottom"), not the
     /// layer it may be raised to temporarily while focused: the menu entry
     /// toggles this persistent setting.
@@ -90,6 +100,44 @@ private:
     void applyMargins();
     void applySize();
     void clampToScreen();
+
+    /// State of the snap hold on one axis. When the moving edge comes within
+    /// kSnapDistance of an edge of another note, it snaps onto it and stays
+    /// there until the pointer passes the edge or leaves the capture zone on the
+    /// other side (see resizeHoldEdge()).
+    struct ResizeHold
+    {
+        bool active = false;
+        int direction = 0;   // +1 growing right/down, -1 shrinking left/up
+        int heldEdge = 0;    // global coordinate of the edge kept fixed
+        int prevEdge = 0;    // edge applied by the previous event (visual edge)
+        QElapsedTimer timer;
+    };
+    /// One axis of the resize hold: given the raw moving edge and the edges of
+    /// the nearby notes, returns the edge to apply. When the hold expires the
+    /// raw (pointer-aligned) edge is returned, so the edge catches up with the
+    /// pointer again instead of staying behind it.
+    int resizeHoldEdge(ResizeHold &hold, int rawEdge, int fixedEdge,
+                       const QList<int> &peerEdges, int minSize);
+    void clearResizeHolds();
+
+    /// State of the drag snap on one axis. While dragging, the note snaps onto
+    /// the homologous edge of a nearby note as soon as it comes within
+    /// kSnapDistance; it stays there until the pointer passes the edge or
+    /// leaves the capture zone on the other side (see dragHoldPos()).
+    struct DragHold
+    {
+        bool active = false;
+        int direction = 0;   // +1 moving right/down, -1 moving left/up
+        int heldPos = 0;     // m_note.x or m_note.y kept fixed
+        QElapsedTimer timer;
+    };
+    /// One axis of the drag snap: given the free target position, the current
+    /// one and the homologous edges of the nearby notes, returns the coordinate
+    /// to apply.
+    int dragHoldPos(DragHold &hold, int freePos, int prevPos, int size,
+                    const QList<int> &nearEdges, const QList<int> &farEdges);
+    void clearDragHolds();
 
     /// Commits the whole wl_surface, applying the double-buffered layer-shell
     /// state (margins, layer, keyboard interactivity). During a drag the card is
@@ -202,9 +250,15 @@ private:
 
     bool m_dragging = false;
     QPoint m_dragRefLocal;
+    DragHold m_dragHoldX;
+    DragHold m_dragHoldY;
     bool m_resizing = false;
     QPoint m_resizeRefLocal;
     QSize m_resizeStartSize;
+    ResizeHold m_resizeHoldX;
+    ResizeHold m_resizeHoldY;
+    /// Whether the "snap" setting is on (see setSnappingEnabled()).
+    bool m_snapEnabled = true;
     bool m_loading = false;
 
     /// Key of the screen the note is currently on ("<W>x<H>|<connector>", built

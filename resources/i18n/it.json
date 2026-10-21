@@ -70,6 +70,8 @@
   "settings.confirm_delete": "Chiedi conferma prima di eliminare una nota",
   "settings.close_to_tray": "Riduci nella barra di sistema",
   "settings.close_to_tray_tooltip": "Chiudendo la finestra o scegliendo “Esci dall'app”, Sticky Notes resta in esecuzione nella barra di sistema.",
+  "settings.snap": "Aggancia le note durante spostamento e ridimensionamento",
+  "settings.snap_tooltip": "Quando il bordo di una nota incontra quello di una nota vicina, la nota si ferma per un attimo per facilitare l'allineamento. Disattiva per spostare e ridimensionare le note liberamente.",
   "settings.data_path": "Dati: %1",
   "settings.random_color": "Casuale (colore a caso)",
   "settings.themes_title": "Temi (colori delle note)",

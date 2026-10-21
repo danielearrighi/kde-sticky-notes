@@ -399,8 +399,12 @@ void AppController::onPurgeAll()
 
 void AppController::onSettingsChanged()
 {
-    for (NoteWindow *w : std::as_const(m_windows))
+    const bool snap = Storage::instance().setting(QStringLiteral("snap"), QStringLiteral("1"))
+                      == QLatin1String("1");
+    for (NoteWindow *w : std::as_const(m_windows)) {
         w->applyTheme(Storage::instance().note(w->noteId()).themeId);
+        w->setSnappingEnabled(snap);
+    }
     applyAutostart();
     updateTrayVisibility();
 }
