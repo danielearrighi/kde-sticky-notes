@@ -21,6 +21,7 @@
 #include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -34,9 +35,26 @@ SettingsTab::SettingsTab(QWidget *parent)
 
 void SettingsTab::buildUi()
 {
-    auto *root = new QVBoxLayout(this);
+    // The settings form is tall: its minimum height would become the hub
+    // window's minimum and prevent shrinking it vertically. The form therefore
+    // lives inside a scroll area whose viewport can go down to a threshold;
+    // below that the content scrolls instead of forcing a taller window.
+    constexpr int kMinViewportHeight = 420;
+
+    auto *content = new QWidget;
+    auto *root = new QVBoxLayout(content);
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(12);
+
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setMinimumHeight(kMinViewportHeight);
+    scroll->setWidget(content);
+
+    auto *outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->addWidget(scroll);
 
     // --- general preferences ---
     auto *general = new QGroupBox(I18n::t(QStringLiteral("settings.title")));
