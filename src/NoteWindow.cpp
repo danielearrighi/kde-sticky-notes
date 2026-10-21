@@ -22,7 +22,6 @@
 #include <QImage>
 #include <QImageReader>
 #include <QBuffer>
-#include <QIcon>
 #include <QApplication>
 #include <QWindow>
 #include <QClipboard>
@@ -54,14 +53,16 @@ constexpr int kTitleHeight = 30;
 constexpr int kResizeGrip = 16;
 constexpr int kMinW = 160;
 constexpr int kMinH = 120;
-// How long the resizing edge stays on the edge of a nearby note it just met.
-// While the hold is active the pointer movement is ignored; when it expires the
-// edge catches up with the pointer again.
-constexpr int kResizeHoldMs = 100;
+// How long a snapped edge/position stays on the edge of a nearby note after the
+// snap has been triggered (dragging and resizing). While the hold is active the
+// pointer movement is ignored; when it expires the edge catches up with the
+// pointer.
+constexpr int kSnapHoldMs = 100;
 // Maximum gap between the notes on the axis perpendicular to the edge being
-// dragged for their edges to be considered. A note does not have to touch the
-// resized one: two notes a few pixels apart still line up.
-constexpr int kResizeHoldRange = 600;
+// moved for their edges to be considered. A note does not have to touch the
+// other one: notes in adjacent rows/columns still line up. The range is
+// deliberately generous, so aligning with a note farther away works too.
+constexpr int kSnapRange = 600;
 // How close (in pixels) the moving edge must get to an edge of a nearby note to
 // snap onto it: within this distance the edge jumps straight onto the exact
 // alignment (drag and resize), which makes the snap clearly visible. 0 = snap
@@ -134,6 +135,32 @@ QSet<NoteWindow *> g_noteWindows;
 bool intervalsNear(int aStart, int aEnd, int bStart, int bEnd, int maxGap)
 {
     return aStart <= bEnd + maxGap && bStart <= aEnd + maxGap;
+}
+
+/// Shared rule of an active snap hold: returns true while the moving edge (or
+/// note position) must stay at \a held, false when the hold has been released
+/// (or was not active). The capture zone extends kSnapDistance in both
+/// directions: reversing beyond the inner side releases the snap, while passing
+/// the target releases it after the pause.
+bool keepSnapHold(bool &active, int direction, int held, int value,
+                  QElapsedTimer &timer)
+{
+    if (!active)
+        return false;
+
+    const int boundary = direction > 0 ? held - kSnapDistance : held + kSnapDistance;
+    const bool reversed = direction > 0 ? value < boundary : value > boundary;
+    if (reversed) {
+        active = false;
+        return false;
+    }
+
+    const bool passed = direction > 0 ? value >= held : value <= held;
+    if (!passed || timer.elapsed() < kSnapHoldMs)
+        return true;
+
+    active = false;
+    return false;
 }
 
 /// Pixel size of the image referenced by \a name, read from the image header
@@ -504,8 +531,9 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     // alternate: the compositor reconfigures the surface to the size asked by
     // the client, the widget refuses it and commits a bigger buffer, and so on
     // -> the note's width flashes while being resized. Keep the layout out of
-    // the window size (the surface is sized by applySize()) and declare the same
-    // floor the resize math enforces.
+    // the window size (the surface is sized by applySize()) and declare the
+    // floor explicitly: width kMinW, height the collapsed note (the title bar
+    // alone). An expanded note is clamped to kMinH by the resize math.
     root->setSizeConstraint(QLayout::SetNoConstraint);
     setMinimumSize(kMinW + 2 * kShadowMargin, kTitleHeight + 2 * kShadowMargin);
 
@@ -530,6 +558,10 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
 
     m_titleLabel = new QLabel(m_titleBar);
     m_titleLabel->setTextInteractionFlags(Qt::NoTextInteraction);
+    // The title is plain text: without this a title containing "<b>" would be
+    // rendered as rich text and the elided width (computed on the raw string)
+    // would no longer match what the label draws.
+    m_titleLabel->setTextFormat(Qt::PlainText);
     m_titleLabel->setObjectName(QStringLiteral("titleText"));
     // The title never dictates the note width: it is elided to the space the
     // label gets (see elideTitle()), while the size policy keeps its text out
@@ -1080,6 +1112,9 @@ void NoteWindow::elideTitle()
                                                                  m_titleLabel->width());
     if (shown != m_titleLabel->text())
         m_titleLabel->setText(shown);
+    // A long title is only fully visible while it is being edited: expose the
+    // complete text when the label actually had to cut it.
+    m_titleLabel->setToolTip(shown == full ? QString() : full);
 }
 
 void NoteWindow::applyTheme(const QString &themeId)
@@ -1517,69 +1552,47 @@ int NoteWindow::resizeHoldEdge(ResizeHold &hold, int rawEdge, int fixedEdge,
                                const QList<int> &peerEdges, int minSize)
 {
     if (hold.active) {
-        // The capture zone starts kSnapDistance before the edge in the direction
-        // of the movement: leaving it on the opposite side releases the snap.
-        const int boundary = hold.direction > 0 ? hold.heldEdge - kSnapDistance
-                                                : hold.heldEdge + kSnapDistance;
-        const bool reversed = hold.direction > 0 ? rawEdge < boundary
-                                                 : rawEdge > boundary;
-        if (reversed) {
-            hold.active = false;
-            hold.prevEdge = rawEdge;
-            return rawEdge;
-        }
-        // Stay on the target while the pointer is still short of it. Once the
-        // pointer has passed it (after the pause) the snap is released and the
-        // edge catches up with the pointer.
-        const bool passed = hold.direction > 0 ? rawEdge >= hold.heldEdge
-                                               : rawEdge <= hold.heldEdge;
-        if (!passed || hold.timer.elapsed() < kResizeHoldMs) {
+        if (keepSnapHold(hold.active, hold.direction, hold.heldEdge, rawEdge,
+                         hold.timer)) {
             hold.prevEdge = hold.heldEdge;
             return hold.heldEdge;
         }
-        hold.active = false;
         hold.prevEdge = rawEdge;
         return rawEdge;
     }
 
     // Nearest peer edge ahead (in the direction of the movement) that is now
     // within the capture distance: the snap brings the edge exactly onto it. A
-    // target that would leave less than the minimum size is not valid.
+    // target that would leave less than the minimum size is not valid. The new
+    // edge must be within kSnapDistance on both sides: without the outer bound,
+    // a fast pointer movement that jumps well past the edge would snap the note
+    // back by the whole overshoot.
     const int prev = hold.prevEdge;
+    const int direction = rawEdge > prev ? 1 : (rawEdge < prev ? -1 : 0);
+    if (direction == 0) {
+        hold.prevEdge = rawEdge;
+        return rawEdge;
+    }
     bool found = false;
     int best = 0;
     int bestTravel = 0;
-    if (rawEdge > prev) {
-        for (int edge : peerEdges) {
-            if (edge - fixedEdge < minSize)
-                continue;
-            if (prev >= edge || rawEdge < edge - kSnapDistance)
-                continue;
-            const int travel = edge - prev;
-            if (!found || travel < bestTravel) {
-                found = true;
-                bestTravel = travel;
-                best = edge;
-            }
-        }
-    } else if (rawEdge < prev) {
-        for (int edge : peerEdges) {
-            if (edge - fixedEdge < minSize)
-                continue;
-            if (prev <= edge || rawEdge > edge + kSnapDistance)
-                continue;
-            const int travel = prev - edge;
-            if (!found || travel < bestTravel) {
-                found = true;
-                bestTravel = travel;
-                best = edge;
-            }
+    for (int edge : peerEdges) {
+        if (edge - fixedEdge < minSize)
+            continue;
+        const bool edgeBehind = direction > 0 ? prev >= edge : prev <= edge;
+        if (edgeBehind || qAbs(rawEdge - edge) > kSnapDistance)
+            continue;
+        const int travel = direction > 0 ? edge - prev : prev - edge;
+        if (!found || travel < bestTravel) {
+            found = true;
+            bestTravel = travel;
+            best = edge;
         }
     }
 
     if (found) {
         hold.active = true;
-        hold.direction = rawEdge > prev ? 1 : -1;
+        hold.direction = direction;
         hold.heldEdge = best;
         hold.timer.restart();
         hold.prevEdge = best;
@@ -1600,24 +1613,9 @@ int NoteWindow::dragHoldPos(DragHold &hold, int freePos, int prevPos, int size,
                             const QList<int> &nearEdges, const QList<int> &farEdges)
 {
     if (hold.active) {
-        // The capture zone starts kSnapDistance before the edge in the direction
-        // of the movement: leaving it on the opposite side releases the snap.
-        const int boundary = hold.direction > 0 ? hold.heldPos - kSnapDistance
-                                                : hold.heldPos + kSnapDistance;
-        const bool reversed = hold.direction > 0 ? freePos < boundary
-                                                 : freePos > boundary;
-        if (reversed) {
-            hold.active = false;
-            return freePos;
-        }
-        // Stay on the alignment while the pointer is still short of it. Once
-        // the pointer has passed it (after the pause) the snap is released and
-        // the note catches up with the pointer.
-        const bool passed = hold.direction > 0 ? freePos >= hold.heldPos
-                                               : freePos <= hold.heldPos;
-        if (!passed || hold.timer.elapsed() < kResizeHoldMs)
+        if (keepSnapHold(hold.active, hold.direction, hold.heldPos, freePos,
+                         hold.timer))
             return hold.heldPos;
-        hold.active = false;
         return freePos;
     }
 
@@ -1628,13 +1626,15 @@ int NoteWindow::dragHoldPos(DragHold &hold, int freePos, int prevPos, int size,
     // Nearest homologous edge ahead (in the direction of the movement) that is
     // now within the capture distance: the note is placed exactly on it. The
     // near edge of the note (left/top) is checked against \a nearEdges, the far
-    // one (right/bottom) against \a farEdges.
+    // one (right/bottom) against \a farEdges. As in resizeHoldEdge(), the new
+    // edge must be within kSnapDistance on both sides, so a fast movement that
+    // jumps past the target does not snap the note back by the whole overshoot.
     bool found = false;
     int bestTravel = 0;
     int bestPos = 0;
     for (int edge : nearEdges) {
-        if (direction > 0 ? (prevPos >= edge || freePos < edge - kSnapDistance)
-                          : (prevPos <= edge || freePos > edge + kSnapDistance))
+        const bool edgeBehind = direction > 0 ? prevPos >= edge : prevPos <= edge;
+        if (edgeBehind || qAbs(freePos - edge) > kSnapDistance)
             continue;
         const int travel = direction > 0 ? edge - prevPos : prevPos - edge;
         if (!found || travel < bestTravel) {
@@ -1646,8 +1646,8 @@ int NoteWindow::dragHoldPos(DragHold &hold, int freePos, int prevPos, int size,
     for (int edge : farEdges) {
         const int movingStart = prevPos + size;
         const int movingEnd = freePos + size;
-        if (direction > 0 ? (movingStart >= edge || movingEnd < edge - kSnapDistance)
-                          : (movingStart <= edge || movingEnd > edge + kSnapDistance))
+        const bool edgeBehind = direction > 0 ? movingStart >= edge : movingStart <= edge;
+        if (edgeBehind || qAbs(movingEnd - edge) > kSnapDistance)
             continue;
         const int travel = direction > 0 ? edge - movingStart : movingStart - edge;
         if (!found || travel < bestTravel) {
@@ -1749,15 +1749,21 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
             // The note pauses as soon as one of its edges meets the homologous
             // edge of a nearby note (left-left, right-right, top-top,
             // bottom-bottom): see dragHoldPos(). Notes only need to be near on
-            // the other axis (same kResizeHoldRange as the resize).
+            // the other axis (same kSnapRange as the resize).
             const int visualH = m_collapsed ? kTitleHeight : m_note.h;
             const int prevX = m_note.x;
             const int prevY = m_note.y;
             const int freeX = prevX + delta.x();
             const int freeY = prevY + delta.y();
             // The note occupies its current position: the free target is only
-            // used to find the edge crossings below.
-            const QRect ours(m_screenRect.topLeft() + QPoint(prevX, prevY),
+            // used to find the edge crossings below. Peer edges come from
+            // globalNoteRect() in global coordinates, while m_note.x/y (and so
+            // prevX/freeX) are relative to the available area of this note's
+            // screen: convert the peer edges to the same local frame before
+            // giving them to dragHoldPos(), otherwise the snap is off by the
+            // screen origin (a top/left panel, or another monitor).
+            const QPoint origin = m_screenRect.topLeft();
+            const QRect ours(origin + QPoint(prevX, prevY),
                              QSize(m_note.w, visualH));
 
             QList<int> peerLefts;
@@ -1769,14 +1775,14 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
                     continue;
                 const QRect r = peer->globalNoteRect();
                 if (intervalsNear(ours.top(), ours.top() + ours.height(),
-                                  r.top(), r.top() + r.height(), kResizeHoldRange)) {
-                    peerLefts.append(r.left());
-                    peerRights.append(r.left() + r.width());
+                                  r.top(), r.top() + r.height(), kSnapRange)) {
+                    peerLefts.append(r.left() - origin.x());
+                    peerRights.append(r.left() + r.width() - origin.x());
                 }
                 if (intervalsNear(ours.left(), ours.left() + ours.width(),
-                                  r.left(), r.left() + r.width(), kResizeHoldRange)) {
-                    peerTops.append(r.top());
-                    peerBottoms.append(r.top() + r.height());
+                                  r.left(), r.left() + r.width(), kSnapRange)) {
+                    peerTops.append(r.top() - origin.y());
+                    peerBottoms.append(r.top() + r.height() - origin.y());
                 }
             }
 
@@ -1821,7 +1827,7 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
 
         // Edge candidates of the nearby notes. On each axis only the notes
         // near the note on the other axis are considered (overlapping or within
-        // kResizeHoldRange), so a note slightly apart still lines up while a
+        // kSnapRange), so a note slightly apart still lines up while a
         // distant one cannot stop an edge that would not even reach it.
         QList<int> xEdges;
         QList<int> yEdges;
@@ -1830,12 +1836,12 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
                 continue;
             const QRect r = peer->globalNoteRect();
             if (intervalsNear(ours.top(), ours.top() + ours.height(),
-                              r.top(), r.top() + r.height(), kResizeHoldRange)) {
+                              r.top(), r.top() + r.height(), kSnapRange)) {
                 xEdges.append(r.left());
                 xEdges.append(r.left() + r.width());
             }
             if (intervalsNear(ours.left(), ours.left() + ours.width(),
-                              r.left(), r.left() + r.width(), kResizeHoldRange)) {
+                              r.left(), r.left() + r.width(), kSnapRange)) {
                 yEdges.append(r.top());
                 yEdges.append(r.top() + r.height());
             }
