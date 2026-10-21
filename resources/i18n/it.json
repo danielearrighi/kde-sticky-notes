@@ -86,7 +86,7 @@
   "backup.restore": "Ripristina backup…",
   "backup.save_title": "Salva backup",
   "backup.open_title": "Apri backup",
-  "backup.filter": "Backup di Sticky Notes (*.json)",
+  "backup.filter": "Backup di Sticky Notes (*.db)",
   "backup.dialog_title": "Backup e ripristino",
   "backup.done": "Backup salvato in:\n%1",
   "backup.failed": "Impossibile salvare il backup:\n%1",

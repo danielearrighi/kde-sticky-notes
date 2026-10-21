@@ -300,8 +300,8 @@ void SettingsTab::doBackup()
     if (dir.isEmpty())
         dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
     const QString suggested = dir + QStringLiteral("/sticky-notes-backup-")
-                              + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmm"))
-                              + QStringLiteral(".json");
+                              + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"))
+                              + QStringLiteral(".db");
 
     const QString path = QFileDialog::getSaveFileName(this,
                                                       I18n::t(QStringLiteral("backup.save_title")),
@@ -338,7 +338,7 @@ void SettingsTab::doRestore()
     // The restore replaces the whole database: let the open notes persist any
     // edit still waiting for the debounced save, so it is not lost.
     emit flushPendingContent();
-    if (!Storage::instance().importBackup(path, true, &error)) {
+    if (!Storage::instance().importBackup(path, &error)) {
         QMessageBox::warning(this, I18n::t(QStringLiteral("backup.dialog_title")),
                              I18n::t(QStringLiteral("backup.restore_failed")).arg(error));
         return;

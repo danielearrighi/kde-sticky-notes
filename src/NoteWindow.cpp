@@ -1168,7 +1168,7 @@ bool NoteWindow::insertImage(const QImage &sourceImage)
         return false;
 
     // The image is embedded in the note content as a data URL (no file, no
-    // path: it is saved with the note and travels with the JSON backups). It is
+    // path: it is saved with the note and travels with the database backups). It is
     // stored at its original size, capped to kMaxImageSide: the note width is
     // NOT baked in, so the body shows it as wide as the note and widening the
     // note really enlarges the image, up to its stored resolution (see

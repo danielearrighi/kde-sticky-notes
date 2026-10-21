@@ -86,7 +86,7 @@
   "backup.restore": "Restaurar copia de seguridad…",
   "backup.save_title": "Guardar copia de seguridad",
   "backup.open_title": "Abrir copia de seguridad",
-  "backup.filter": "Copia de seguridad de Sticky Notes (*.json)",
+  "backup.filter": "Copia de seguridad de Sticky Notes (*.db)",
   "backup.dialog_title": "Copia de seguridad y restauración",
   "backup.done": "Copia de seguridad guardada en:\n%1",
   "backup.failed": "No se pudo guardar la copia de seguridad:\n%1",

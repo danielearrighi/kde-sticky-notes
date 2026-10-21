@@ -11,10 +11,9 @@
 #include <QStringList>
 #include <QVariant>
 #include <QFile>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QSaveFile>
+
+#include <utility>
 
 namespace {
 const char *kConn = "sticky-notes";
@@ -314,21 +313,6 @@ QRect Storage::notePosition(qint64 id, const QString &screenKey) const
     return {};
 }
 
-QList<QPair<QString, QRect>> Storage::notePositions(qint64 id) const
-{
-    QList<QPair<QString, QRect>> out;
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral(
-        "SELECT screen_key,x,y,w,h FROM note_positions WHERE note_id=? ORDER BY screen_key"));
-    q.addBindValue(id);
-    if (!q.exec())
-        return out;
-    while (q.next())
-        out.append({q.value(0).toString(),
-                    QRect(q.value(1).toInt(), q.value(2).toInt(), q.value(3).toInt(), q.value(4).toInt())});
-    return out;
-}
-
 void Storage::updateTheme(qint64 id, const QString &themeId)
 {
     QSqlQuery q(db());
@@ -518,203 +502,136 @@ void Storage::setSetting(const QString &key, const QString &value)
 // ---------------------------------------------------------------- backup
 
 namespace {
-QJsonObject noteToJson(const Note &n, const QList<QPair<QString, QRect>> &positions)
+/// Replaces \a target with the contents of \a source. QSaveFile streams the
+/// data to a temporary file and only renames it over the target on commit, so a
+/// failure never leaves a half-written file behind.
+bool replaceFile(const QString &source, const QString &target, QString *errorOut)
 {
-    QJsonObject o;
-    o[QStringLiteral("title")] = n.title;
-    o[QStringLiteral("content")] = n.content;
-    o[QStringLiteral("theme")] = n.themeId;
-    o[QStringLiteral("x")] = n.x;
-    o[QStringLiteral("y")] = n.y;
-    o[QStringLiteral("w")] = n.w;
-    o[QStringLiteral("h")] = n.h;
-    o[QStringLiteral("layer")] = n.layer;
-    o[QStringLiteral("visible")] = n.visible;
-    o[QStringLiteral("collapsed")] = n.collapsed;
-    o[QStringLiteral("scroll")] = n.scroll;
-    o[QStringLiteral("opacity")] = n.opacity;
-    o[QStringLiteral("deleted")] = n.deleted;
-    o[QStringLiteral("created_at")] = n.createdAt;
-    o[QStringLiteral("updated_at")] = n.updatedAt;
-    o[QStringLiteral("deleted_at")] = n.deletedAt;
-    o[QStringLiteral("last_screen_key")] = n.lastScreenKey;
-
-    // Per-screen positions (screen key -> rect), so a restored backup keeps the
-    // exact placement on every monitor the note has been on.
-    QJsonArray posArr;
-    for (const QPair<QString, QRect> &p : positions) {
-        QJsonObject po;
-        po[QStringLiteral("screen_key")] = p.first;
-        po[QStringLiteral("x")] = p.second.x();
-        po[QStringLiteral("y")] = p.second.y();
-        po[QStringLiteral("w")] = p.second.width();
-        po[QStringLiteral("h")] = p.second.height();
-        posArr.append(po);
+    QFile in(source);
+    if (!in.open(QIODevice::ReadOnly)) {
+        if (errorOut)
+            *errorOut = in.errorString();
+        return false;
     }
-    o[QStringLiteral("positions")] = posArr;
-    return o;
-}
-
-QJsonObject themeToJson(const Theme &t)
-{
-    QJsonObject o;
-    o[QStringLiteral("id")] = t.id;
-    o[QStringLiteral("name")] = t.name;
-    o[QStringLiteral("body")] = t.body;
-    o[QStringLiteral("title_bar")] = t.titleBar;
-    o[QStringLiteral("text_color")] = t.text;
-    o[QStringLiteral("sort")] = t.sort;
-    o[QStringLiteral("builtin")] = t.builtin;
-    return o;
+    QSaveFile out(target);
+    if (!out.open(QIODevice::WriteOnly)) {
+        if (errorOut)
+            *errorOut = out.errorString();
+        return false;
+    }
+    while (!in.atEnd()) {
+        const QByteArray chunk = in.read(1 << 16);
+        if (chunk.isEmpty())
+            break;
+        if (out.write(chunk) != chunk.size()) {
+            if (errorOut)
+                *errorOut = out.errorString();
+            out.cancelWriting();
+            return false;
+        }
+    }
+    if (!out.commit()) {
+        if (errorOut)
+            *errorOut = out.errorString();
+        return false;
+    }
+    return true;
 }
 } // namespace
 
 bool Storage::exportBackup(const QString &path, QString *errorOut) const
 {
-    QJsonArray noteArr;
-    for (const Note &n : notes(true))
-        noteArr.append(noteToJson(n, notePositions(n.id)));
-
-    QJsonArray themeArr;
-    for (const Theme &t : themes())
-        themeArr.append(themeToJson(t));
-
-    QJsonObject root;
-    root[QStringLiteral("app")] = QStringLiteral("sticky-notes");
-    root[QStringLiteral("version")] = 1;
-    root[QStringLiteral("exported_at")] = nowIso();
-    root[QStringLiteral("notes")] = noteArr;
-    root[QStringLiteral("themes")] = themeArr;
-
-    // QSaveFile writes to a temporary file and replaces the target atomically on
-    // commit: a failed backup never leaves a half-written file behind.
-    QSaveFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        if (errorOut)
-            *errorOut = f.errorString();
+    // VACUUM INTO writes a consistent, self-contained copy of the live database
+    // (the WAL contents included) without touching the original. It refuses an
+    // existing target, hence the temporary file, which is then moved into place.
+    const QString staged = path + QStringLiteral(".tmp");
+    QFile::remove(staged);
+    {
+        QSqlQuery q(db());
+        q.prepare(QStringLiteral("VACUUM INTO ?"));
+        q.addBindValue(staged);
+        if (!q.exec()) {
+            if (errorOut)
+                *errorOut = q.lastError().text();
+            QFile::remove(staged);
+            return false;
+        }
+    }
+    if (!replaceFile(staged, path, errorOut)) {
+        QFile::remove(staged);
         return false;
     }
-    f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
-    if (!f.commit()) {
-        if (errorOut)
-            *errorOut = f.errorString();
-        return false;
-    }
+    QFile::remove(staged);
     return true;
 }
 
-bool Storage::importBackup(const QString &path, bool replaceExisting, QString *errorOut)
+bool Storage::importBackup(const QString &path, QString *errorOut)
 {
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (errorOut)
-            *errorOut = f.errorString();
-        return false;
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &parseError);
-    const QJsonObject root = doc.object();
-    if (doc.isNull() || !doc.isObject()
-        || root.value(QStringLiteral("app")).toString() != QStringLiteral("sticky-notes")
-        || !root.value(QStringLiteral("notes")).isArray()) {
-        if (errorOut)
-            *errorOut = parseError.errorString().isEmpty()
-                            ? QStringLiteral("not a Sticky Notes backup")
-                            : parseError.errorString();
-        return false;
-    }
-
-    QSqlDatabase database = db();
-    database.transaction();
-
-    // Themes first: the imported notes reference them by id.
-    for (const QJsonValue &v : root.value(QStringLiteral("themes")).toArray()) {
-        const QJsonObject o = v.toObject();
-        Theme t;
-        t.id = o.value(QStringLiteral("id")).toString();
-        if (t.id.isEmpty())
-            continue;
-        t.name = o.value(QStringLiteral("name")).toString();
-        t.body = o.value(QStringLiteral("body")).toString();
-        t.titleBar = o.value(QStringLiteral("title_bar")).toString();
-        t.text = o.value(QStringLiteral("text_color")).toString();
-        t.sort = o.value(QStringLiteral("sort")).toInt();
-        t.builtin = o.value(QStringLiteral("builtin")).toBool(true);
-        upsertTheme(t);
-    }
-
-    if (replaceExisting) {
-        QSqlQuery del(database);
-        del.exec(QStringLiteral("DELETE FROM notes"));
-    }
-
-    QSqlQuery ins(database);
-    ins.prepare(QStringLiteral(
-        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,"
-        "deleted,last_screen_key,created_at,updated_at,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
-    QSqlQuery posIns(database);
-    posIns.prepare(QStringLiteral(
-        "INSERT OR REPLACE INTO note_positions (note_id,screen_key,x,y,w,h) VALUES (?,?,?,?,?,?)"));
-    const QString now = nowIso();
-    for (const QJsonValue &v : root.value(QStringLiteral("notes")).toArray()) {
-        const QJsonObject o = v.toObject();
-        const QString created = o.value(QStringLiteral("created_at")).toString();
-        const QString updated = o.value(QStringLiteral("updated_at")).toString();
-        ins.addBindValue(bindText(o.value(QStringLiteral("title")).toString()));
-        ins.addBindValue(bindText(o.value(QStringLiteral("content")).toString()));
-        ins.addBindValue(bindText(o.value(QStringLiteral("theme")).toString(QStringLiteral("giallo"))));
-        ins.addBindValue(o.value(QStringLiteral("x")).toInt(220));
-        ins.addBindValue(o.value(QStringLiteral("y")).toInt(160));
-        ins.addBindValue(o.value(QStringLiteral("w")).toInt(230));
-        ins.addBindValue(o.value(QStringLiteral("h")).toInt(190));
-        ins.addBindValue(bindText(o.value(QStringLiteral("layer")).toString(QStringLiteral("top"))));
-        ins.addBindValue(o.value(QStringLiteral("visible")).toBool(true) ? 1 : 0);
-        ins.addBindValue(o.value(QStringLiteral("collapsed")).toBool(false) ? 1 : 0);
-        ins.addBindValue(o.value(QStringLiteral("scroll")).toInt());
-        ins.addBindValue(qBound(10, o.value(QStringLiteral("opacity")).toInt(100), 100));
-        ins.addBindValue(o.value(QStringLiteral("deleted")).toBool(false) ? 1 : 0);
-        ins.addBindValue(bindText(o.value(QStringLiteral("last_screen_key")).toString()));
-        ins.addBindValue(created.isEmpty() ? now : created);
-        ins.addBindValue(updated.isEmpty() ? now : updated);
-        ins.addBindValue(bindText(o.value(QStringLiteral("deleted_at")).toString()));
-        if (!ins.exec()) {
-            qWarning() << "Storage::importBackup:" << ins.lastError().text();
-            database.rollback();
-            if (errorOut)
-                *errorOut = ins.lastError().text();
-            return false;
-        }
-
-        // Per-screen positions of this note (absent in old backups). They are
-        // keyed by the note id just inserted.
-        const qint64 newId = ins.lastInsertId().toLongLong();
-        for (const QJsonValue &pv : o.value(QStringLiteral("positions")).toArray()) {
-            const QJsonObject po = pv.toObject();
-            const QString key = po.value(QStringLiteral("screen_key")).toString();
-            if (key.isEmpty())
-                continue;
-            posIns.addBindValue(newId);
-            posIns.addBindValue(key);
-            posIns.addBindValue(po.value(QStringLiteral("x")).toInt());
-            posIns.addBindValue(po.value(QStringLiteral("y")).toInt());
-            posIns.addBindValue(po.value(QStringLiteral("w")).toInt(230));
-            posIns.addBindValue(po.value(QStringLiteral("h")).toInt(190));
-            if (!posIns.exec()) {
-                qWarning() << "Storage::importBackup (positions):" << posIns.lastError().text();
-                database.rollback();
-                if (errorOut)
-                    *errorOut = posIns.lastError().text();
-                return false;
+    // Validate the candidate on its own read-only connection before touching the
+    // live database: a random .db file must not replace the notes.
+    {
+        const QString checkConn = QStringLiteral("sticky-notes-backup-check");
+        bool valid = false;
+        {
+            QSqlDatabase check = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), checkConn);
+            check.setDatabaseName(path);
+            check.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+            if (check.open()) {
+                const QStringList tables = check.tables();
+                valid = tables.contains(QStringLiteral("notes"))
+                        && tables.contains(QStringLiteral("themes"));
+                check.close();
             }
         }
+        QSqlDatabase::removeDatabase(checkConn);
+        if (!valid) {
+            if (errorOut)
+                *errorOut = QStringLiteral("not a Sticky Notes database");
+            return false;
+        }
     }
 
-    if (!database.commit()) {
+    // Preferences are app-local, not data: a restore replaces the notes (and
+    // their themes) but keeps the current settings.
+    QList<QPair<QString, QString>> settings;
+    {
+        QSqlQuery q(db());
+        if (q.exec(QStringLiteral("SELECT key,value FROM settings")))
+            while (q.next())
+                settings.append(qMakePair(q.value(0).toString(), q.value(1).toString()));
+    }
+
+    // Swapping the files needs the database closed, so that SQLite checkpoints
+    // the WAL into notes.db and releases it. The WAL/SHM files of the old
+    // database must not survive: they would be applied to the restored one.
+    {
+        QSqlDatabase database = db();
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(QString::fromLatin1(kConn));
+    QFile::remove(m_path + QStringLiteral("-wal"));
+    QFile::remove(m_path + QStringLiteral("-shm"));
+
+    QString swapError;
+    if (!replaceFile(path, m_path, &swapError)) {
+        // Put the current database back in service: nothing was replaced.
+        QString reopenError;
+        open(&reopenError);
         if (errorOut)
-            *errorOut = database.lastError().text();
-        database.rollback();
+            *errorOut = swapError;
         return false;
     }
+
+    // Reopen. open() also migrates a backup written by an older version (missing
+    // tables or columns).
+    QString openError;
+    if (!open(&openError)) {
+        if (errorOut)
+            *errorOut = openError;
+        return false;
+    }
+
+    for (const QPair<QString, QString> &kv : std::as_const(settings))
+        setSetting(kv.first, kv.second);
     return true;
 }

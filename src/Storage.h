@@ -33,9 +33,6 @@ public:
     /// Saved screen-relative position of a note on a given screen, or an invalid
     /// QRect when the note has never been placed there.
     QRect notePosition(qint64 id, const QString &screenKey) const;
-    /// Every saved per-screen position of a note (screen key -> rect), used by
-    /// the backup export.
-    QList<QPair<QString, QRect>> notePositions(qint64 id) const;
     void updateTheme(qint64 id, const QString &themeId);
     void updateLayer(qint64 id, const QString &layer);
     void updateCollapsed(qint64 id, bool collapsed);
@@ -59,14 +56,16 @@ public:
     void setSetting(const QString &key, const QString &value);
 
     // --- Backup ---
-    /// Writes the notes (and their themes) to a JSON backup file. Returns false
-    /// and sets errorOut on write failure.
+    /// Writes a self-contained copy of the database (notes, themes, per-screen
+    /// positions) to \a path, replacing an existing file. Returns false and sets
+    /// errorOut on write failure.
     bool exportBackup(const QString &path, QString *errorOut = nullptr) const;
-    /// Reads a JSON backup written by exportBackup(). With replaceExisting the
-    /// current notes are deleted before the backup ones are inserted; themes are
-    /// always upserted. Returns false and sets errorOut if the file is missing or
-    /// is not a Sticky Notes backup.
-    bool importBackup(const QString &path, bool replaceExisting, QString *errorOut = nullptr);
+    /// Replaces the live database with the one at \a path (a file written by
+    /// exportBackup()). The file is validated first, then the connection is
+    /// closed, the database file swapped and reopened; the current preferences
+    /// are kept. Returns false and sets errorOut if the file is missing or is not
+    /// a Sticky Notes database.
+    bool importBackup(const QString &path, QString *errorOut = nullptr);
 
 private:
     Storage() = default;
