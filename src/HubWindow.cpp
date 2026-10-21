@@ -13,7 +13,7 @@ HubWindow::HubWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("Sticky Notes"));
-    resize(880, 620);
+    resize(880, 720);
 
     m_notes = new NotesTab;
     m_trash = new TrashTab;
