@@ -183,6 +183,47 @@ QSize imagePixelSize(QTextDocument *doc, const QString &name)
     return QImageReader(&buffer).size();
 }
 
+/// Applies the link colour and underline to every anchor in [from, to).
+/// An anchor can carry its own foreground: a rich paste imports the colour
+/// stored in the HTML (often black), and NoteWindow::applyStyle() recolours
+/// the whole document with the theme text colour. Left alone, both turn a
+/// link into normal-looking text, so the link format is restored here.
+void applyLinkFormatToAnchors(QTextDocument *doc, int from, int to, const QColor &linkColor)
+{
+    if (!doc || from >= to)
+        return;
+
+    // The ranges are collected first: changing a format can split or merge
+    // fragments and would invalidate the iterators (as in applyImageSizing()).
+    QList<QPair<int, int>> anchors;   // (position, length)
+    for (QTextBlock block = doc->findBlock(from);
+         block.isValid() && block.position() < to; block = block.next()) {
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment fragment = it.fragment();
+            if (!fragment.isValid() || !fragment.charFormat().isAnchor())
+                continue;
+            const int start = qMax(fragment.position(), from);
+            const int end = qMin(fragment.position() + fragment.length(), to);
+            if (start < end)
+                anchors.append({start, end - start});
+        }
+    }
+    if (anchors.isEmpty())
+        return;
+
+    QTextCursor c(doc);
+    c.beginEditBlock();
+    QTextCharFormat link;
+    link.setForeground(linkColor);
+    link.setFontUnderline(true);
+    for (const QPair<int, int> &range : anchors) {
+        c.setPosition(range.first);
+        c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
+        c.mergeCharFormat(link);
+    }
+    c.endEditBlock();
+}
+
 /// QTextEdit that turns a pasted/dropped image into a note image: the handler
 /// installed by NoteWindow stores it inside the document (see
 /// NoteWindow::insertImage()). It also recognizes URLs typed or pasted in the
@@ -303,6 +344,16 @@ protected:
             if (inserted)
                 return;
         }
+
+        // Plain text pasted at the end of a link inherits the anchor format at
+        // the caret (href included), which would silently turn the whole pasted
+        // text into a link. Detach the insertion format first; rich text keeps
+        // its own anchors.
+        if (source && source->hasText() && !source->hasHtml()) {
+            const QTextCharFormat fmt = textCursor().charFormat();
+            if (fmt.isAnchor())
+                setCurrentCharFormat(withoutAnchor(fmt));
+        }
         QTextEdit::insertFromMimeData(source);
     }
 
@@ -392,38 +443,72 @@ private:
             if (end > start && !isMarkdownTarget(text, start, end))
                 ranges.append({from + start, end - start});
         }
-        if (ranges.isEmpty())
-            return;
-
         // The format the cursor had before the link: restored below when the
         // cursor ends up at the end of a freshly linked URL, so the next typed
         // character does not inherit the link colour/underline.
         const QTextCharFormat before = textCursor().charFormat();
 
         m_linkifying = true;
-        QTextCursor c(document());
-        c.beginEditBlock();
-        for (const QPair<int, int> &range : ranges) {
-            c.setPosition(range.first);
-            c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
-            QTextCharFormat fmt = c.charFormat();
-            if (fmt.isAnchor())
-                continue;   // already a link: keep its href and formatting
-            QString href = text.mid(range.first - from, range.second);
-            if (href.startsWith(QLatin1String("www."), Qt::CaseInsensitive))
-                href.prepend(QStringLiteral("https://"));
-            fmt.setAnchor(true);
-            fmt.setAnchorHref(href);
-            fmt.setFontUnderline(true);
-            fmt.setForeground(palette().color(QPalette::Link));
-            c.mergeCharFormat(fmt);
-        }
-        c.endEditBlock();
 
-        if (textCursor().charFormat().isAnchor())
-            setCurrentCharFormat(before);
+        // A rich paste can already carry anchors with their own foreground:
+        // they need no href, but they keep the app's link colour.
+        applyLinkFormatToAnchors(document(), from, to, palette().color(QPalette::Link));
+
+        if (!ranges.isEmpty()) {
+            QTextCursor c(document());
+            c.beginEditBlock();
+            for (const QPair<int, int> &range : ranges) {
+                c.setPosition(range.first);
+                c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
+                QTextCharFormat fmt = c.charFormat();
+                if (fmt.isAnchor())
+                    continue;   // already a link: keep its href, colour normalized above
+                QString href = text.mid(range.first - from, range.second);
+                if (href.startsWith(QLatin1String("www."), Qt::CaseInsensitive))
+                    href.prepend(QStringLiteral("https://"));
+                fmt.setAnchor(true);
+                fmt.setAnchorHref(href);
+                fmt.setFontUnderline(true);
+                fmt.setForeground(palette().color(QPalette::Link));
+                c.mergeCharFormat(fmt);
+            }
+            c.endEditBlock();
+
+            if (textCursor().charFormat().isAnchor())
+                setCurrentCharFormat(before);
+        }
 
         m_linkifying = false;
+    }
+
+    /// A copy of \a fmt with the link properties removed: no anchor, no href,
+    /// no link underline and no explicit foreground (so the note's text colour
+    /// applies again).
+    static QTextCharFormat withoutAnchor(QTextCharFormat fmt)
+    {
+        fmt.setAnchor(false);
+        fmt.clearProperty(QTextFormat::AnchorHref);
+        fmt.setFontUnderline(false);
+        fmt.clearProperty(QTextFormat::ForegroundBrush);
+        return fmt;
+    }
+
+    /// A whitespace typed right after a link inherits the anchor format from
+    /// the caret: without this the space (and everything typed after it) would
+    /// silently continue the link. Strip the link properties from the inserted
+    /// whitespace and from the format used by the next typed character.
+    void breakAnchorAt(int position, int length)
+    {
+        QTextCursor c(document());
+        c.setPosition(position);
+        c.setPosition(position + length, QTextCursor::KeepAnchor);
+        const QTextCharFormat fmt = c.charFormat();
+        if (!fmt.isAnchor())
+            return;
+
+        const QTextCharFormat clean = withoutAnchor(fmt);
+        c.setCharFormat(clean);
+        setCurrentCharFormat(clean);
     }
 
     /// Linkifies a word as soon as it is terminated by a space/Enter, or the
@@ -454,6 +539,10 @@ private:
         while (start > 0 && !document()->characterAt(start - 1).isSpace())
             --start;
         linkifyRange(start, end);
+
+        // The whitespace itself must never stay inside the link: when the caret
+        // was at the end of an anchor it inherited the anchor format.
+        breakAnchorAt(position, charsAdded);
     }
 
     /// The image carried by the MIME data as image data (a screenshot, a copy
@@ -1196,12 +1285,17 @@ void NoteWindow::applyStyle()
 
     // The format above only affects newly typed text, and the stylesheet only
     // the text without an explicit foreground: recolor what is already in the
-    // document (e.g. after a theme change). A merge keeps bold/italic/links.
-    QTextCursor all(m_body->document());
+    // document (e.g. after a theme change). A merge keeps bold/italic, but not
+    // the link colour: it overwrites the anchor foreground too, so the link
+    // format is restored right after (see applyLinkFormatToAnchors()).
+    QTextDocument *doc = m_body->document();
+    QTextCursor all(doc);
     all.select(QTextCursor::Document);
     QTextCharFormat fg;
     fg.setForeground(QColor(m_theme.text));
     all.mergeCharFormat(fg);
+    applyLinkFormatToAnchors(doc, 0, doc->characterCount(),
+                             m_body->palette().color(QPalette::Link));
 
     // The note background is painted by hand from m_theme (see paintCard()):
     // force a repaint so a theme change is reflected right away.

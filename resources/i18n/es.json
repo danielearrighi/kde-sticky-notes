@@ -16,7 +16,7 @@
   "app.tab_info": "Información",
   "app.quit": "Salir de la aplicación",
   "app.close_to_tray": "Cerrar a la bandeja del sistema",
-  "app.tray_show": "Mostrar ventana",
+  "app.tray_show": "Mostrar ventana principal",
   "app.tray_show_notes": "Mostrar notas",
   "app.tray_hide_notes": "Ocultar notas",
   "app.db_error": "No se puede abrir la base de datos:\n%1",

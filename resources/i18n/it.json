@@ -16,7 +16,7 @@
   "app.tab_info": "Info",
   "app.quit": "Esci dall'app",
   "app.close_to_tray": "Riduci nella barra di sistema",
-  "app.tray_show": "Mostra finestra",
+  "app.tray_show": "Mostra finestra principale",
   "app.tray_show_notes": "Visualizza note",
   "app.tray_hide_notes": "Nascondi note",
   "app.db_error": "Impossibile aprire il database:\n%1",

@@ -113,9 +113,12 @@ chmod +x "$linuxdeploy" "$qt_plugin" "$appimage_tool" "$runtime"
 
 # linuxdeploy resolves --plugin qt by looking for `linuxdeploy-plugin-qt` next to
 # itself (also with an .AppImage suffix), so expose the downloaded file once.
-ln -sf "$(basename "$qt_plugin")" "$tools_dir/linuxdeploy-plugin-qt.AppImage"
-ln -sf "$(basename "$linuxdeploy")" "$tools_dir/linuxdeploy.AppImage"
-ln -sf "$(basename "$qt_plugin")" "$tools_dir/linuxdeploy-plugin-qt"
+# Use hard links, not symlinks: this directory lives under a Synology Drive sync
+# folder, and the client cannot sync symbolic links (it retries forever with
+# "Server response unexpected error 'System error'").
+ln -f "$qt_plugin" "$tools_dir/linuxdeploy-plugin-qt.AppImage"
+ln -f "$linuxdeploy" "$tools_dir/linuxdeploy.AppImage"
+ln -f "$qt_plugin" "$tools_dir/linuxdeploy-plugin-qt"
 
 # --- 3. AppDir -------------------------------------------------------------
 

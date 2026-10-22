@@ -16,7 +16,7 @@
   "app.tab_info": "Info",
   "app.quit": "Quit app",
   "app.close_to_tray": "Close to Tray",
-  "app.tray_show": "Show window",
+  "app.tray_show": "Show main window",
   "app.tray_show_notes": "Show notes",
   "app.tray_hide_notes": "Hide notes",
   "app.db_error": "Cannot open the database:\n%1",
