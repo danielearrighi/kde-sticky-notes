@@ -116,6 +116,16 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   the target's. Do not let linuxdeploy's symlink replace `AppRun` and do not
   drop the copy step: without it the AppImage is rejected as "glibc too new".
 
+## Git
+
+- **Never commit unless the user has explicitly asked you to commit.** A request
+  to implement, fix or test something is **not** permission to commit: do the
+  work, show the result, and wait. Do not commit, amend, revert or tag on your
+  own initiative.
+- The same applies to everything that publishes or rewrites state outside the
+  working tree: `git push`, tags, releases, and comments or reviews on GitHub.
+  Do it only when the user asks for that specific action.
+
 ## Notes for agents (context budget)
 
 - Locate symbols with `grep`/pattern search and open only the files you actually
