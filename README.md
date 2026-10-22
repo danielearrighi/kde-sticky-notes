@@ -1,4 +1,4 @@
-# Sticky Notes
+# KDE Sticky Notes
 
 Desktop sticky notes for **KDE Plasma (Wayland)**.
 ![Sticky Notes: colored notes on the desktop and the hub with the note grid](screens/splash.png)

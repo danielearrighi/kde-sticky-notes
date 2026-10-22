@@ -108,6 +108,13 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   top/overlay on-demand surfaces when their interactivity changes
   (`LayerShellV1Window::handleAcceptsFocusChanged()`).
 - Do not reference /docs files since they are not committed to the repository.
+- **The AppImage bundles the C library** (`scripts/build_appimage.sh`): it is
+  built on a rolling release (Tumbleweed, glibc 2.44) while AppImageHub tests on
+  the oldest Ubuntu LTS still in standard support (glibc 2.35). `AppRun` is a
+  script that execs the bundled `ld-linux` with `--library-path`, and
+  `libstdc++`/`libgcc_s` are bundled as well because the build GCC is newer than
+  the target's. Do not let linuxdeploy's symlink replace `AppRun` and do not
+  drop the copy step: without it the AppImage is rejected as "glibc too new".
 
 ## Notes for agents (context budget)
 

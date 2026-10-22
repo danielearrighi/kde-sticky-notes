@@ -7,6 +7,11 @@
 # shell integration are forced in (the app only runs on KDE Plasma / wlroots
 # Wayland), and the KDE Plasma platform theme and Breeze style are deployed so the
 # app does not fall back to a light Fusion look.
+#
+# The C library, its loader and libstdc++ are bundled (X-AppImage-Libc=bundled):
+# this script runs on a rolling release (glibc 2.44 on Tumbleweed), while the
+# AppImageHub test runs on the oldest Ubuntu LTS still in standard support
+# (glibc 2.35), and an AppImage must run on both.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
@@ -166,6 +171,48 @@ log "Running linuxdeploy (this scans and copies the Qt/KDE dependencies)"
 
 # Optional trim (see docs/APPIMAGE.md): the GTK3 theme is useless on KDE.
 rm -f "$appdir/usr/plugins/platformthemes/libqgtk3.so"
+
+# --- 4b. C library, loader and C++ runtime ---------------------------------
+# The build host decides which glibc the payload needs, and it is the newest
+# (Tumbleweed). Bundling libc together with its loader makes the AppImage
+# independent of the host's C library: AppImageHub then reports
+# X-AppImage-Libc=bundled instead of rejecting it as "glibc too new".
+# libstdc++ and libgcc_s must go with it because this GCC is newer than the
+# target's (libicu needs CXXABI_1.3.15), and linuxdeploy never bundles them.
+
+log "Bundling glibc, the dynamic loader and libstdc++"
+glibc_dir="$(dirname "$(readlink -f "$(ldd "$binary" | awk '/libc\.so\.6/ { print $3; exit }')")")"
+loader="$(ldd "$binary" | awk '/ld-linux/ { print $1; exit }')"
+[[ -d "$glibc_dir" ]] || { echo "Could not locate the C library" >&2; exit 1; }
+[[ -n "$loader" && -e "$loader" ]] || { echo "Could not locate the dynamic loader" >&2; exit 1; }
+
+for lib in libc.so.6 libm.so.6 libmvec.so.1 libpthread.so.0 libdl.so.2 \
+           librt.so.1 libutil.so.1 libanl.so.1 libresolv.so.2 libnsl.so.1; do
+    [[ -e "$glibc_dir/$lib" ]] && cp -Lf "$glibc_dir/$lib" "$appdir/usr/lib/"
+done
+# Name resolution: ld.so looks these up by soname through --library-path.
+for lib in "$glibc_dir"/libnss_*.so.*; do
+    [[ -e "$lib" ]] || continue
+    cp -Lf "$lib" "$appdir/usr/lib/"
+done
+for lib in libstdc++.so.6 libgcc_s.so.1; do
+    path="$(ldd "$binary" | awk -v want="$lib" '$1 == want { print $3; exit }')"
+    [[ -n "$path" ]] && cp -Lf "$path" "$appdir/usr/lib/"
+done
+cp -Lf "$loader" "$appdir/usr/lib/$(basename "$loader")"
+
+# linuxdeploy's AppRun is a symlink to the binary. Replace it with a script that
+# starts the bundled loader, otherwise the loader of the host would be used and
+# the bundled C library ignored.
+rm -f "$appdir/AppRun"
+cat > "$appdir/AppRun" <<EOF
+#!/bin/sh
+here="\${APPDIR:-\$(dirname "\$(readlink -f "\$0")")}"
+exec "\$here/usr/lib/$(basename "$loader")" \\
+     --library-path "\$here/usr/lib" \\
+     "\$here/usr/bin/sticky-notes" "\$@"
+EOF
+chmod +x "$appdir/AppRun"
 
 # --- 5. Package ------------------------------------------------------------
 
