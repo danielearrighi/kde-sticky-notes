@@ -9,7 +9,7 @@
 #include <QCloseEvent>
 #include <QTabWidget>
 
-HubWindow::HubWindow(QWidget *parent)
+HubWindow::HubWindow(Updater *updater, QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("Sticky Notes"));
@@ -18,7 +18,7 @@ HubWindow::HubWindow(QWidget *parent)
     m_notes = new NotesTab;
     m_trash = new TrashTab;
     m_settings = new SettingsTab;
-    m_info = new InfoTab;
+    m_info = new InfoTab(updater);
 
     m_tabs = new QTabWidget(this);
     m_tabs->addTab(m_notes, I18n::t(QStringLiteral("app.tab_notes")));
@@ -65,4 +65,9 @@ void HubWindow::refresh()
     m_notes->refresh();
     m_trash->refresh();
     m_settings->refresh();
+}
+
+void HubWindow::promptForUpdate(const Updater::CheckResult &result)
+{
+    m_info->promptForUpdate(result);
 }

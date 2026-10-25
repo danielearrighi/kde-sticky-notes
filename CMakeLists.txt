@@ -27,6 +27,7 @@ qt_add_executable(sticky-notes
     src/I18n.h            src/I18n.cpp
     src/NoteWindow.h      src/NoteWindow.cpp
     src/UiHelpers.h       src/UiHelpers.cpp
+    src/Updater.h         src/Updater.cpp
     src/tabs/NotesTab.h        src/tabs/NotesTab.cpp
     src/tabs/TrashTab.h        src/tabs/TrashTab.cpp
     src/tabs/SettingsTab.h     src/tabs/SettingsTab.cpp

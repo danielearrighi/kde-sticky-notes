@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Updater.h"
+
 #include <QMainWindow>
 
 class QTabWidget;
@@ -15,10 +17,14 @@ class HubWindow : public QMainWindow
 {
     Q_OBJECT
 public:
-    explicit HubWindow(QWidget *parent = nullptr);
+    explicit HubWindow(Updater *updater, QWidget *parent = nullptr);
 
     /// Reloads contents from Storage (forwarded to the three tabs).
     void refresh();
+
+    /// Shows the "update available" dialog (used when an automatic check found
+    /// a new version while the hub was hidden).
+    void promptForUpdate(const Updater::CheckResult &result);
 
 signals:
     void newNoteRequested();

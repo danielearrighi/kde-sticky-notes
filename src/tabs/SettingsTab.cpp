@@ -110,6 +110,8 @@ void SettingsTab::buildUi()
     m_closeToTray->setToolTip(I18n::t(QStringLiteral("settings.close_to_tray_tooltip")));
     m_snap = new QCheckBox(I18n::t(QStringLiteral("settings.snap")));
     m_snap->setToolTip(I18n::t(QStringLiteral("settings.snap_tooltip")));
+    m_updateCheck = new QCheckBox(I18n::t(QStringLiteral("settings.check_updates")));
+    m_updateCheck->setToolTip(I18n::t(QStringLiteral("settings.check_updates_tooltip")));
 
     form->addRow(I18n::t(QStringLiteral("settings.default_theme")), m_defaultTheme);
     form->addRow(I18n::t(QStringLiteral("settings.default_position")), m_defaultLayer);
@@ -136,6 +138,7 @@ void SettingsTab::buildUi()
     form->addRow(QString(), m_confirmDelete);
     form->addRow(QString(), m_closeToTray);
     form->addRow(QString(), m_snap);
+    form->addRow(QString(), m_updateCheck);
 
     auto *path = new QLabel(I18n::t(QStringLiteral("settings.data_path"))
                                 .arg(Storage::instance().databasePath()));
@@ -221,6 +224,7 @@ void SettingsTab::buildUi()
         Storage::instance().setSetting(QStringLiteral("confirm_delete"), m_confirmDelete->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         Storage::instance().setSetting(QStringLiteral("close_to_tray"), m_closeToTray->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         Storage::instance().setSetting(QStringLiteral("snap"), m_snap->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
+        Storage::instance().setSetting(QStringLiteral("update_check"), m_updateCheck->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         emit settingsChanged();
     };
     // currentIndexChanged does not fire when the user re-selects the already
@@ -263,6 +267,9 @@ void SettingsTab::buildUi()
     });
     connect(m_snap, &QCheckBox::toggled, this, [save](bool checked) {
         save(QStringLiteral("snap"), checked ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    connect(m_updateCheck, &QCheckBox::toggled, this, [save](bool checked) {
+        save(QStringLiteral("update_check"), checked ? QStringLiteral("1") : QStringLiteral("0"));
     });
 
     // Language change needs a restart: save and relaunch with "--restart" so the
@@ -514,6 +521,7 @@ void SettingsTab::loadIntoUi()
     m_confirmDelete->setChecked(Storage::instance().setting(QStringLiteral("confirm_delete"), QStringLiteral("1")) != QLatin1String("0"));
     m_closeToTray->setChecked(Storage::instance().setting(QStringLiteral("close_to_tray"), QStringLiteral("0")) == QLatin1String("1"));
     m_snap->setChecked(Storage::instance().setting(QStringLiteral("snap"), QStringLiteral("1")) == QLatin1String("1"));
+    m_updateCheck->setChecked(Storage::instance().setting(QStringLiteral("update_check"), QStringLiteral("1")) == QLatin1String("1"));
 
     // theme list
     const QString keep = m_editingThemeId;

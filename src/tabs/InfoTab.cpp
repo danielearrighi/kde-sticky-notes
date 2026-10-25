@@ -8,36 +8,29 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonValue>
 #include <QLabel>
 #include <QList>
+#include <QLocale>
 #include <QMessageBox>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QPair>
 #include <QPalette>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSysInfo>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
-#include <QVersionNumber>
 #include <qglobal.h> // qVersion()
 
 namespace {
 const QString kRepositoryUrl = QStringLiteral("https://github.com/danielearrighi/kde-sticky-notes");
 const QString kReleasesUrl = QStringLiteral("https://github.com/danielearrighi/kde-sticky-notes/releases");
-const QString kTagsUrl = QStringLiteral("https://api.github.com/repos/danielearrighi/kde-sticky-notes/tags?per_page=100");
 } // namespace
 
-InfoTab::InfoTab(QWidget *parent)
+InfoTab::InfoTab(Updater *updater, QWidget *parent)
     : QWidget(parent)
+    , m_updater(updater)
 {
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(12, 12, 12, 12);
@@ -127,95 +120,212 @@ InfoTab::InfoTab(QWidget *parent)
     connect(m_checkUpdates, &QPushButton::clicked, this, &InfoTab::checkForUpdates);
 
     root->addStretch();
+
+    if (m_updater) {
+        connect(m_updater, &Updater::checkFinished, this, &InfoTab::onCheckFinished);
+        connect(m_updater, &Updater::downloadProgress, this, &InfoTab::onDownloadProgress);
+        connect(m_updater, &Updater::installSucceeded, this, &InfoTab::onInstallSucceeded);
+        connect(m_updater, &Updater::installFailed, this, &InfoTab::onInstallFailed);
+        connect(m_updater, &Updater::installCancelled, this, &InfoTab::onInstallCancelled);
+    }
 }
 
 void InfoTab::checkForUpdates()
 {
-    if (!m_network)
-        m_network = new QNetworkAccessManager(this);
+    if (!m_updater)
+        return;
 
     m_checkUpdates->setEnabled(false);
     m_checkUpdates->setText(I18n::t(QStringLiteral("info.checking_updates")));
-
-    QNetworkRequest request{QUrl(kTagsUrl)};
-    request.setHeader(QNetworkRequest::UserAgentHeader,
-                      QStringLiteral("StickyNotes/%1").arg(QCoreApplication::applicationVersion()));
-    request.setRawHeader("Accept", "application/vnd.github+json");
-
-    QNetworkReply *reply = m_network->get(request);
-    // Do not leave the button disabled forever when GitHub is unreachable.
-    QTimer::singleShot(15000, reply, [reply] { reply->abort(); });
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        handleUpdateReply(reply);
-        reply->deleteLater();
-        m_checkUpdates->setEnabled(true);
-        m_checkUpdates->setText(I18n::t(QStringLiteral("info.check_updates")));
-    });
+    // The result arrives through checkFinished (also when this launch merged
+    // into an automatic check that was already running).
+    m_updater->checkNow(true);
 }
 
-void InfoTab::handleUpdateReply(QNetworkReply *reply)
+void InfoTab::onCheckFinished(const Updater::CheckResult &result, bool userInitiated)
 {
-    const auto fail = [this](const QString &reason) {
+    m_checkUpdates->setEnabled(true);
+    m_checkUpdates->setText(I18n::t(QStringLiteral("info.check_updates")));
+
+    // Automatic checks are handled by AppController; stay silent unless the
+    // user pressed the button.
+    if (!userInitiated)
+        return;
+
+    if (!result.ok) {
+        if (result.error == Updater::CheckError::InvalidResponse) {
+            QMessageBox::warning(this,
+                                 I18n::t(QStringLiteral("info.update_check_failed_title")),
+                                 I18n::t(QStringLiteral("info.update_check_invalid_response")));
+            return;
+        }
+        const QString reason = result.error == Updater::CheckError::HttpStatus
+                                   ? QStringLiteral("HTTP %1").arg(result.errorDetail)
+                                   : result.errorDetail;
         QMessageBox::warning(this, I18n::t(QStringLiteral("info.update_check_failed_title")),
                              I18n::t(QStringLiteral("info.update_check_failed")).arg(reason));
-    };
-
-    if (reply->error() != QNetworkReply::NoError) {
-        fail(reply->errorString());
         return;
     }
 
-    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (status != 200) {
-        fail(QStringLiteral("HTTP %1").arg(status));
+    if (!result.updateAvailable) {
+        QMessageBox::information(
+            this, I18n::t(QStringLiteral("info.up_to_date_title")),
+            I18n::t(QStringLiteral("info.up_to_date")).arg(QCoreApplication::applicationVersion()));
         return;
     }
 
-    const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-    if (!doc.isArray()) {
-        fail(I18n::t(QStringLiteral("info.update_check_invalid_response")));
-        return;
-    }
+    promptForUpdate(result);
+}
 
-    // Tags may be prefixed with "v": compare their semantic versions and keep
-    // the greatest one, regardless of the order the API returned them in.
-    QVersionNumber latestVersion;
-    QString latestTag;
-    for (const QJsonValue &value : doc.array()) {
-        const QString tag = value.toObject().value(QStringLiteral("name")).toString();
-        QString normalized = tag;
-        if (normalized.startsWith(QLatin1Char('v'), Qt::CaseInsensitive))
-            normalized.remove(0, 1);
-        const QVersionNumber version = QVersionNumber::fromString(normalized);
-        if (version.isNull())
-            continue;
-        if (latestVersion.isNull() || QVersionNumber::compare(version, latestVersion) > 0) {
-            latestVersion = version;
-            latestTag = tag;
-        }
-    }
+void InfoTab::promptForUpdate(const Updater::CheckResult &result)
+{
+    const bool selfUpdate = m_updater && m_updater->canSelfUpdate();
+    const bool canInstall = selfUpdate && !result.assetUrl.isEmpty();
 
-    if (latestVersion.isNull()) {
-        fail(I18n::t(QStringLiteral("info.update_check_invalid_response")));
-        return;
-    }
-
-    const QString installed = QCoreApplication::applicationVersion();
-    const QVersionNumber installedVersion = QVersionNumber::fromString(installed);
-    if (QVersionNumber::compare(latestVersion, installedVersion) <= 0) {
-        QMessageBox::information(this, I18n::t(QStringLiteral("info.up_to_date_title")),
-                                 I18n::t(QStringLiteral("info.up_to_date")).arg(installed));
-        return;
-    }
-
-    QMessageBox box(this);
+    QWidget *parentWidget = dialogParent();
+    QMessageBox box(parentWidget);
     box.setIcon(QMessageBox::Information);
     box.setWindowTitle(I18n::t(QStringLiteral("info.update_available_title")));
-    box.setText(I18n::t(QStringLiteral("info.update_available")).arg(latestTag, installed));
-    QPushButton *download = box.addButton(I18n::t(QStringLiteral("info.download")),
-                                          QMessageBox::AcceptRole);
-    box.addButton(I18n::t(QStringLiteral("info.close")), QMessageBox::RejectRole);
+    box.setText(I18n::t(QStringLiteral("info.update_available"))
+                    .arg(result.latestTag, QCoreApplication::applicationVersion()));
+
+    QPushButton *install = nullptr;
+    if (canInstall)
+        install = box.addButton(I18n::t(QStringLiteral("info.install_now")), QMessageBox::AcceptRole);
+    else if (!selfUpdate)
+        box.setInformativeText(I18n::t(QStringLiteral("info.update_unsupported")));
+    else
+        box.setInformativeText(I18n::t(QStringLiteral("info.update_no_asset")));
+
+    QPushButton *page =
+        box.addButton(I18n::t(QStringLiteral("info.open_release_page")), QMessageBox::ActionRole);
+    box.addButton(I18n::t(QStringLiteral("later")), QMessageBox::RejectRole);
+
     box.exec();
-    if (box.clickedButton() == download)
+    if (install && box.clickedButton() == install) {
+        startInstall();
+    } else if (box.clickedButton() == page) {
         QDesktopServices::openUrl(QUrl(kReleasesUrl));
+    } else {
+        // "Later": do not propose this version again on the automatic checks.
+        Storage::instance().setSetting(QStringLiteral("update_skipped_version"),
+                                       result.latestVersion);
+    }
+}
+
+void InfoTab::startInstall()
+{
+    if (!m_updater || m_progress)
+        return;
+
+    m_progress = new QProgressDialog(I18n::t(QStringLiteral("info.update_downloading")),
+                                     I18n::t(QStringLiteral("cancel")), 0, 100, dialogParent());
+    m_progress->setWindowTitle(I18n::t(QStringLiteral("info.update_available_title")));
+    m_progress->setWindowModality(Qt::WindowModal);
+    m_progress->setMinimumDuration(0);
+    m_progress->setAutoClose(false);
+    m_progress->setAutoReset(false);
+    m_progress->setValue(0);
+    connect(m_progress, &QProgressDialog::canceled, this, [this] {
+        if (m_updater)
+            m_updater->cancel();
+    });
+    m_progress->show();
+
+    m_updater->downloadAndInstall();
+}
+
+void InfoTab::onDownloadProgress(qint64 received, qint64 total)
+{
+    if (!m_progress)
+        return;
+
+    if (total > 0) {
+        m_progress->setMaximum(100);
+        m_progress->setValue(static_cast<int>((received * 100) / total));
+        m_progress->setLabelText(QStringLiteral("%1\n%2 / %3")
+                                     .arg(I18n::t(QStringLiteral("info.update_downloading")),
+                                          QLocale::system().formattedDataSize(received),
+                                          QLocale::system().formattedDataSize(total)));
+    } else {
+        m_progress->setMaximum(0);
+    }
+}
+
+void InfoTab::onInstallSucceeded()
+{
+    closeProgress();
+
+    QWidget *parentWidget = dialogParent();
+    QMessageBox box(parentWidget);
+    box.setIcon(QMessageBox::Information);
+    box.setWindowTitle(I18n::t(QStringLiteral("info.update_installed_title")));
+    box.setText(I18n::t(QStringLiteral("info.update_restart_question")));
+    QPushButton *restart = box.addButton(I18n::t(QStringLiteral("restart_now")),
+                                         QMessageBox::AcceptRole);
+    box.addButton(I18n::t(QStringLiteral("later")), QMessageBox::RejectRole);
+    box.exec();
+
+    if (box.clickedButton() == restart && m_updater && !m_updater->restartApplication()) {
+        QMessageBox::warning(parentWidget,
+                             I18n::t(QStringLiteral("info.update_install_failed_title")),
+                             I18n::t(QStringLiteral("info.update_restart_manual")));
+    }
+}
+
+void InfoTab::onInstallFailed(Updater::InstallError error, const QString &detail)
+{
+    closeProgress();
+
+    const QString why = detail.isEmpty() ? I18n::t(QStringLiteral("info.unknown_error")) : detail;
+    QString text;
+    switch (error) {
+    case Updater::InstallError::Unsupported:
+        text = I18n::t(QStringLiteral("info.update_unsupported"));
+        break;
+    case Updater::InstallError::NoAsset:
+        text = I18n::t(QStringLiteral("info.update_no_asset"));
+        break;
+    case Updater::InstallError::NotWritable:
+        text = I18n::t(QStringLiteral("info.update_not_writable"));
+        break;
+    case Updater::InstallError::Checksum:
+        text = I18n::t(QStringLiteral("info.update_checksum_failed"));
+        break;
+    case Updater::InstallError::SizeMismatch:
+        text = I18n::t(QStringLiteral("info.update_size_mismatch"));
+        break;
+    case Updater::InstallError::Extract:
+        text = I18n::t(QStringLiteral("info.update_extract_failed")).arg(why);
+        break;
+    case Updater::InstallError::Network:
+    case Updater::InstallError::Replace:
+    case Updater::InstallError::None:
+        text = I18n::t(QStringLiteral("info.update_install_failed")).arg(why);
+        break;
+    }
+
+    QMessageBox::warning(dialogParent(),
+                         I18n::t(QStringLiteral("info.update_install_failed_title")), text);
+}
+
+void InfoTab::onInstallCancelled()
+{
+    closeProgress();
+}
+
+void InfoTab::closeProgress()
+{
+    if (!m_progress)
+        return;
+    m_progress->disconnect(this);
+    m_progress->close();
+    m_progress->deleteLater();
+    m_progress = nullptr;
+}
+
+QWidget *InfoTab::dialogParent()
+{
+    // A hidden parent would place the dialog badly: fall back to the hub.
+    return isVisible() ? this : window();
 }

@@ -69,6 +69,28 @@ rm -f ~/.local/bin/sticky-notes \
       ~/.local/share/icons/hicolor/256x256/apps/sticky-notes.png
 ```
 
+## Updates
+
+Sticky Notes checks GitHub for a new release **at most once a day** while it is
+running (the check is done at startup and when the hub is opened; it can be
+turned off in *Settings*), and the **Info** tab has a *Check for updates*
+button at any time. Nothing is downloaded without asking: the prompt offers
+*Download and install*, and the download is verified against the release
+`SHA256SUMS` before replacing anything.
+
+- **AppImage** — the file you launched is replaced in place and the app
+  restarts itself. The whole AppImage is downloaded (about 70 MB; delta updates
+  are not implemented yet).
+- **tar.gz install** — if you installed with the bundled `install.sh` into
+  `~/.local`, the new tarball is extracted and `~/.local/bin/sticky-notes` is
+  replaced. The `.desktop` entry and the icon are unchanged.
+- **Development builds** (`build/sticky-notes`) and **system packages**
+  (`/usr/bin`, managed by the distribution) cannot update themselves: the
+  dialog only links to the release page.
+
+The previous file is kept as `sticky-notes.old` until the next successful
+start, so a broken update can be recovered by hand.
+
 ---
 
 ## What you can do
@@ -86,7 +108,8 @@ rm -f ~/.local/bin/sticky-notes \
 - **Manage notes from the hub** — the taskbar icon opens a grid of notes (open,
   hide, delete, new) plus a **trash** and the **settings**, where you can also
   back up and restore your notes.
-- **Info** — Qt/libraries versions, the data path and the author.
+- **Info** — Qt/libraries versions, the data path, the author and the update
+  check (a new version can be downloaded and installed from there).
 - **Autostart and tray** — start the notes at login; optionally keep the app
   running in the system tray when the hub is closed.
 - **Single instance** — launching the app again just brings the hub to the front.

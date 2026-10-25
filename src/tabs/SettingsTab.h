@@ -58,6 +58,7 @@ private:
     QCheckBox *m_confirmDelete = nullptr;
     QCheckBox *m_closeToTray = nullptr;
     QCheckBox *m_snap = nullptr;
+    QCheckBox *m_updateCheck = nullptr;
 
     // theme editor
     QListWidget *m_themeList = nullptr;

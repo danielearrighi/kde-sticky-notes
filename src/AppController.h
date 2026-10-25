@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Models.h"
+#include "Updater.h"
 
 #include <QObject>
 #include <QHash>
@@ -50,6 +51,7 @@ private slots:
     void onBackupRestored();
     void onQuitRequested();
     void relayoutNotesOnScreens();
+    void onUpdateCheckFinished(const Updater::CheckResult &result, bool userInitiated);
 
 private:
     NoteWindow *ensureWindow(const Note &note);
@@ -63,10 +65,16 @@ private:
     bool closeToTrayEnabled() const;
     QPoint cascadePosition() const;
     void connectScreen(QScreen *screen);
+    /// Runs the daily update check when enabled and due (never on an autostart
+    /// launch, which must stay invisible).
+    void maybeAutoCheckUpdates();
 
     HubWindow *m_hub = nullptr;
     QLocalServer *m_server = nullptr;
     QSystemTrayIcon *m_tray = nullptr;
     QTimer *m_screenTimer = nullptr;
+    Updater *m_updater = nullptr;
+    Updater::CheckResult m_pendingUpdate;
+    bool m_hasPendingUpdate = false;
     QHash<qint64, NoteWindow *> m_windows;
 };

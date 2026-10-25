@@ -92,7 +92,12 @@ bool AppController::listenForSecondInstance(QString *errorOut)
 
 void AppController::start(bool startHidden)
 {
-    m_hub = new HubWindow;
+    // Created before the hub: InfoTab receives it and runs the manual check,
+    // while the daily automatic check is driven from here.
+    m_updater = new Updater(this);
+    connect(m_updater, &Updater::checkFinished, this, &AppController::onUpdateCheckFinished);
+
+    m_hub = new HubWindow(m_updater);
     connect(m_hub, &HubWindow::newNoteRequested, this, &AppController::onNewNote);
     connect(m_hub, &HubWindow::noteVisibilityToggled, this, &AppController::onVisibilityToggled);
     connect(m_hub, &HubWindow::deleteNoteRequested, this, &AppController::onDeleteNote);
@@ -151,6 +156,9 @@ void AppController::start(bool startHidden)
         m_hub->show();
         m_hub->raise();
         m_hub->activateWindow();
+        // Not on an autostart launch: the hub is hidden there and a dialog
+        // would pop up over the desktop at login.
+        maybeAutoCheckUpdates();
     }
 
     applyAutostart();
@@ -164,6 +172,8 @@ void AppController::showHub()
     m_hub->setWindowState((m_hub->windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
     m_hub->raise();
     m_hub->activateWindow();
+    // The app may stay in the tray for days: catch up when the hub is opened.
+    maybeAutoCheckUpdates();
 }
 
 NoteWindow *AppController::ensureWindow(const Note &note)
@@ -452,6 +462,57 @@ void AppController::onQuitRequested()
     QApplication::quit();
 }
 
+void AppController::maybeAutoCheckUpdates()
+{
+    if (!m_updater || !m_updater->canSelfUpdate() || m_updater->busy())
+        return;
+    if (Storage::instance().setting(QStringLiteral("update_check"), QStringLiteral("1"))
+        != QLatin1String("1"))
+        return;
+
+    // At most once a day; the timestamp is written by onUpdateCheckFinished.
+    constexpr qint64 kOneDaySeconds = 24 * 60 * 60;
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    const qint64 last = Storage::instance()
+                            .setting(QStringLiteral("update_last_check"), QStringLiteral("0"))
+                            .toLongLong();
+    if (last > 0 && now - last < kOneDaySeconds)
+        return;
+
+    m_updater->checkNow(false);
+}
+
+void AppController::onUpdateCheckFinished(const Updater::CheckResult &result, bool userInitiated)
+{
+    if (result.ok)
+        Storage::instance().setSetting(QStringLiteral("update_last_check"),
+                                       QString::number(QDateTime::currentSecsSinceEpoch()));
+
+    // Manual checks: InfoTab reports "up to date", errors and the install prompt.
+    if (userInitiated || !result.ok || !result.updateAvailable)
+        return;
+
+    // "Later" in a previous prompt: do not propose the same version again
+    // (a manual check still shows it).
+    const QString skipped =
+        Storage::instance().setting(QStringLiteral("update_skipped_version"));
+    if (!skipped.isEmpty() && skipped == result.latestVersion)
+        return;
+
+    if (m_hub && m_hub->isVisible()) {
+        m_hub->promptForUpdate(result);
+    } else if (m_tray && m_tray->isVisible()) {
+        // The hub is hidden: notify through the tray and open the dialog on
+        // click. Without a tray there is nothing to disturb the user with; the
+        // manual check in the Info tab remains available.
+        m_pendingUpdate = result;
+        m_hasPendingUpdate = true;
+        m_tray->showMessage(I18n::t(QStringLiteral("app.update_tray_title")),
+                            I18n::t(QStringLiteral("app.update_tray_text")).arg(result.latestTag),
+                            QSystemTrayIcon::Information, 10000);
+    }
+}
+
 void AppController::setupTray()
 {
     if (!QSystemTrayIcon::isSystemTrayAvailable())
@@ -480,6 +541,17 @@ void AppController::setupTray()
     connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
             showHub();
+    });
+
+    // An update found while the hub was hidden was announced through the tray:
+    // clicking the notification opens the hub with the update dialog.
+    connect(m_tray, &QSystemTrayIcon::messageClicked, this, [this] {
+        if (!m_hasPendingUpdate)
+            return;
+        m_hasPendingUpdate = false;
+        showHub();
+        if (m_hub)
+            m_hub->promptForUpdate(m_pendingUpdate);
     });
 }
 

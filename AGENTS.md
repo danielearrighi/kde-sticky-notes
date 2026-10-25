@@ -42,6 +42,14 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   date formatting) live in `UiHelpers`. `Themes` = builtin palette; `I18n` =
   runtime translations (symbolic keys, `resources/i18n/*.json`), selected by the
   `language` setting and applied at the next start.
+- `Updater` (`src/Updater.{h,cpp}`) checks
+  `https://api.github.com/repos/danielearrighi/kde-sticky-notes/releases/latest`,
+  verifies the asset against the release `SHA256SUMS` and replaces the running
+  file. `AppController` runs the daily automatic check (`update_check`,
+  `update_last_check`, `update_skipped_version` settings; never on an
+  `--autostart` launch) and routes the prompt to `InfoTab`, which also owns the
+  manual button and the download progress. `STICKY_NOTES_UPDATE_FEED` overrides
+  the API URL for local testing.
 - Closing the hub (X or *Quit app*) quits the app by default: `HubWindow::closeEvent()`
   emits `quitRequested`, and `AppController::onQuitRequested()` decides what that
   means. With the **Close to system tray** setting the hub is only hidden instead
@@ -108,6 +116,17 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   top/overlay on-demand surfaces when their interactivity changes
   (`LayerShellV1Window::handleAcceptsFocusChanged()`).
 - Do not reference /docs files since they are not committed to the repository.
+- **Self-update restart paths**: an AppImage must be restarted through
+  `$APPIMAGE` (the file the runtime exported), never through
+  `QCoreApplication::applicationFilePath()`, which points inside
+  `/tmp/.mount_*/usr/bin/` and disappears with the process. A tarball install
+  replaces `~/.local/bin/sticky-notes` and restarts that file. The replacement
+  is atomic: the new file is downloaded/extracted next to the target, checked
+  against `SHA256SUMS`, the old one is renamed to `<target>.old` and removed on
+  the next start. Development builds and `/usr/bin` packages are reported as
+  unsupported (not writable): never attempt a self-update there.
+- `scripts/create_release.sh` must upload `SHA256SUMS` with every release: the
+  updater refuses to install an asset whose hash cannot be verified.
 - **The AppImage bundles the C library** (`scripts/build_appimage.sh`): it is
   built on a rolling release (Tumbleweed, glibc 2.44) while AppImageHub tests on
   the oldest Ubuntu LTS still in standard support (glibc 2.35). `AppRun` is a

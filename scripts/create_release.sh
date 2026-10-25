@@ -10,7 +10,8 @@
 # The script reads the version from CMakeLists.txt, expects
 # release/sticky-notes-<version>-<arch>.AppImage and .tar.gz, asks for the
 # release notes (multi-line Markdown in $EDITOR), creates the tag on the remote
-# at HEAD and uploads the two files. It never commits or pushes code on its own:
+# at HEAD and uploads the two files plus SHA256SUMS (which the app checks before
+# installing an update). It never commits or pushes code on its own:
 # if HEAD is not pushed yet it asks first.
 set -euo pipefail
 
@@ -26,7 +27,7 @@ usage() {
 Usage: scripts/create_release.sh [options]
 
 Creates the GitHub release for the version in CMakeLists.txt, uploading
-release/sticky-notes-<version>-<arch>.AppImage and .tar.gz.
+release/sticky-notes-<version>-<arch>.AppImage, .tar.gz and SHA256SUMS.
 
 Options:
   -y, --yes              do not ask for confirmation
@@ -151,6 +152,17 @@ fi
 
 grep -q '[^[:space:]]' "$notes_tmp" || die "Empty release notes, aborted"
 
+# Checksums: the app verifies the downloaded asset against this file before
+# replacing itself, so every release must carry it.
+sums="$root/release/SHA256SUMS"
+if ((dry_run)); then
+    log "Would write $sums"
+else
+    ( cd "$root/release" \
+        && sha256sum "$(basename "$appimage")" "$(basename "$tarball")" > "$sums" ) \
+        || die "Could not write $sums"
+fi
+
 printf '\n----- release notes for %s -----\n' "$tag"
 cat "$notes_tmp"
 printf -- '--------------------------------\n\n'
@@ -167,7 +179,7 @@ run gh release create "$tag" \
     --title "$tag" \
     --notes-file "$notes_tmp" \
     --target "$(git rev-parse HEAD)" \
-    "$appimage" "$tarball"
+    "$appimage" "$tarball" "$sums"
 
 if ((dry_run)); then
     log "Dry run: nothing was created"
