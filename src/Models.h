@@ -15,6 +15,7 @@ struct Note
     QString layer = QStringLiteral("top");   // "top" | "bottom"
     bool visible = true;
     bool collapsed = false;   // collapsed to the title bar only
+    bool locked = false;      // position locked: the note cannot be dragged
     int scroll = 0;           // saved body scroll position (vertical pixels)
     int opacity = 100;        // window opacity, 10..100 (%)
     bool deleted = false;

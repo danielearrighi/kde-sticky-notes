@@ -14,6 +14,7 @@
 #include <QScrollBar>
 #include <QToolButton>
 #include <QMenu>
+#include <QWidgetAction>
 #include <QTimer>
 #include <QPainter>
 #include <QPainterPath>
@@ -27,6 +28,7 @@
 #include <QWindow>
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QDebug>
 #include <QPalette>
 #include <QRegularExpression>
 #include <QScreen>
@@ -44,7 +46,6 @@
 #include <QTextImageFormat>
 #include <QTextCursor>
 #include <QTextDocument>
-#include <QDebug>
 
 #include <functional>
 
@@ -58,17 +59,23 @@ constexpr int kMinH = 120;
 // snap has been triggered (dragging and resizing). While the hold is active the
 // pointer movement is ignored; when it expires the edge catches up with the
 // pointer.
-constexpr int kSnapHoldMs = 100;
+constexpr int kSnapHoldMs = 150;
 // Maximum gap between the notes on the axis perpendicular to the edge being
 // moved for their edges to be considered. A note does not have to touch the
 // other one: notes in adjacent rows/columns still line up. The range is
 // deliberately generous, so aligning with a note farther away works too.
-constexpr int kSnapRange = 600;
+constexpr int kSnapRange = 300;
 // How close (in pixels) the moving edge must get to an edge of a nearby note to
 // snap onto it: within this distance the edge jumps straight onto the exact
 // alignment (drag and resize), which makes the snap clearly visible. 0 = snap
 // only when the edges actually touch. Increase it to make the snap stronger.
-constexpr int kSnapDistance = 10;
+constexpr int kSnapDistance = 20;
+// Minimum interval between two surface moves while dragging. Wayland position
+// commits are asynchronous: moving on every pointer event can compute a delta
+// against a surface that has not moved yet, applying the same offset again and
+// again. This is only an upper bound: applyDragMove() also waits for a frame
+// update before using another local pointer coordinate.
+constexpr int kDragUpdateMs = 16;
 // Rounded corners of the note and the transparent border left around it to
 // draw a small drop shadow. The layer-shell surface is kShadowMargin larger
 // than the note on every side; applyMargins() compensates the offset so the
@@ -141,8 +148,8 @@ bool intervalsNear(int aStart, int aEnd, int bStart, int bEnd, int maxGap)
 /// Shared rule of an active snap hold: returns true while the moving edge (or
 /// note position) must stay at \a held, false when the hold has been released
 /// (or was not active). The capture zone extends kSnapDistance in both
-/// directions: reversing beyond the inner side releases the snap, while passing
-/// the target releases it after the pause.
+/// directions: leaving it on either side releases the snap immediately, while
+/// passing the target inside the zone releases it after the pause.
 bool keepSnapHold(bool &active, int direction, int held, int value,
                   QElapsedTimer &timer)
 {
@@ -157,7 +164,20 @@ bool keepSnapHold(bool &active, int direction, int held, int value,
     }
 
     const bool passed = direction > 0 ? value >= held : value <= held;
-    if (!passed || timer.elapsed() < kSnapHoldMs)
+    if (!passed)
+        return true;
+
+    // Beyond the capture zone the pointer is no longer near the snapped edge:
+    // release immediately. Waiting for the hold timeout would leave the note
+    // behind while the pointer moves away, and it would then jump by the whole
+    // overshoot when the hold expires.
+    const int overshoot = direction > 0 ? value - held : held - value;
+    if (overshoot > kSnapDistance) {
+        active = false;
+        return false;
+    }
+
+    if (timer.elapsed() < kSnapHoldMs)
         return true;
 
     active = false;
@@ -607,6 +627,27 @@ QIcon menuIcon(const QString &name, const QString &fallback = QString())
     return QIcon::fromTheme(fallback);
 }
 
+/// Recolours a monochrome theme icon with \a color, keeping the device pixel
+/// ratio. Breeze follows the desktop icon theme (which can be light while the
+/// note title bar stays pastel), so the lock glyph is tinted with the theme's
+/// text colour to stay readable.
+QPixmap tintedIconPixmap(const QIcon &icon, int size, const QColor &color, qreal dpr)
+{
+    const QPixmap source = icon.pixmap(QSize(size, size), dpr);
+    if (source.isNull())
+        return source;
+
+    QPixmap tinted(source.size());
+    tinted.setDevicePixelRatio(source.devicePixelRatio());
+    tinted.fill(Qt::transparent);
+    QPainter p(&tinted);
+    p.drawPixmap(0, 0, source);
+    p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    p.fillRect(tinted.rect(), color);
+    p.end();
+    return tinted;
+}
+
 } // namespace
 
 NoteWindow::NoteWindow(const Note &note, QWidget *parent)
@@ -658,6 +699,15 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     bar->setContentsMargins(6, 0, 2, 0);
     bar->setSpacing(4);
 
+    // Lock indicator, left of the title. It only takes space when the note is
+    // locked (see applyLockedState()).
+    m_lockIcon = new QLabel(m_titleBar);
+    m_lockIcon->setObjectName(QStringLiteral("lockIcon"));
+    m_lockIcon->setFixedSize(16, 16);
+    m_lockIcon->setAlignment(Qt::AlignCenter);
+    m_lockIcon->setToolTip(I18n::t(QStringLiteral("note.locked")));
+    m_lockIcon->hide();
+
     m_titleLabel = new QLabel(m_titleBar);
     m_titleLabel->setTextInteractionFlags(Qt::NoTextInteraction);
     // The title is plain text: without this a title containing "<b>" would be
@@ -696,6 +746,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_closeButton->setCursor(Qt::PointingHandCursor);
     m_closeButton->setToolTip(I18n::t(QStringLiteral("note.delete")));
 
+    bar->addWidget(m_lockIcon);
     bar->addWidget(m_titleLabel, 1);
     bar->addWidget(m_titleEdit, 1);
     bar->addWidget(m_collapseButton);
@@ -728,6 +779,11 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_saveTimer = new QTimer(this);
     m_saveTimer->setSingleShot(true);
     m_saveTimer->setInterval(700);
+
+    // Throttles the surface moves during a drag: see kDragUpdateMs.
+    m_dragTimer = new QTimer(this);
+    m_dragTimer->setInterval(kDragUpdateMs);
+    connect(m_dragTimer, &QTimer::timeout, this, &NoteWindow::applyDragMove);
 
     // The layer of "desktop" notes (bottom) must be restored when focus is
     // really lost, but deactivating the surface is not always a definitive
@@ -772,6 +828,7 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     // Saved collapsed state: restore the appearance (applySize() applies the height).
     m_collapsed = m_note.collapsed;
     applyCollapsedVisuals();
+    applyLockedState();
 
     // layer-shell
     createWinId();
@@ -810,12 +867,12 @@ void NoteWindow::configureLayerShell()
 {
     QWindow *wh = windowHandle();
     if (!wh) {
-        qWarning() << "[nota] windowHandle() nullo: nessuna superficie layer-shell";
+        qWarning() << "[note] windowHandle() is null: no layer-shell surface";
         return;
     }
     m_layer = LayerShellQt::Window::get(wh);
     if (!m_layer) {
-        qWarning() << "[nota] LayerShellQt::Window::get() nullo";
+        qWarning() << "[note] LayerShellQt::Window::get() returned null";
         return;
     }
     using LS = LayerShellQt::Window;
@@ -1160,7 +1217,10 @@ void NoteWindow::setVisibleState(bool visible)
         // Hidden: no focus possible, return to the configured layer.
         m_focusLayerTimer->stop();
         m_raisedForFocus = false;
+        m_dragTimer->stop();
         m_dragging = false;
+        m_dragAwaitingFrame = false;
+        m_dragNeedsFreshInput = false;
         m_resizing = false;
         clearResizeHolds();
         clearDragHolds();
@@ -1313,6 +1373,9 @@ void NoteWindow::applyStyle()
     // The note background is painted by hand from m_theme (see paintCard()):
     // force a repaint so a theme change is reflected right away.
     m_card->update();
+
+    // The lock glyph follows the theme text colour.
+    applyLockedState();
 }
 
 void NoteWindow::applyOpacity()
@@ -1412,7 +1475,7 @@ bool NoteWindow::insertImage(const QImage &sourceImage)
     QBuffer buffer(&png);
     buffer.open(QIODevice::WriteOnly);
     if (!image.save(&buffer, "PNG")) {
-        qWarning() << "[nota] image not encoded";
+        qWarning() << "[note] image not encoded";
         return false;
     }
 
@@ -1495,6 +1558,29 @@ void NoteWindow::applyCollapsedVisuals()
                                           : QStringLiteral("_"));
     m_collapseButton->setToolTip(m_collapsed ? I18n::t(QStringLiteral("restore"))
                                              : I18n::t(QStringLiteral("note.minimize")));
+}
+
+void NoteWindow::applyLockedState()
+{
+    m_lockIcon->setPixmap(tintedIconPixmap(
+        menuIcon(QStringLiteral("object-locked"), QStringLiteral("lock")),
+        14, QColor(m_theme.text), devicePixelRatioF()));
+    m_lockIcon->setVisible(m_note.locked);
+
+    // Defensive: if the note is locked while a drag is somehow still active
+    // (e.g. the lock is toggled from a menu opened during the drag), stop it
+    // instead of letting the drag continue on a locked note.
+    if (m_note.locked && m_dragging) {
+        m_dragTimer->stop();
+        m_dragging = false;
+        m_dragAwaitingFrame = false;
+        m_dragNeedsFreshInput = false;
+        clearDragHolds();
+        unsetCursor();
+        endDragVisuals();
+        emit geometryEdited(m_note.id, m_note.x, m_note.y, m_note.w, m_note.h,
+                            m_screenKey);
+    }
 }
 
 void NoteWindow::toggleCollapse()
@@ -1595,6 +1681,18 @@ bool NoteWindow::eventFilter(QObject *watched, QEvent *event)
     // forcing the note wider (see elideTitle()).
     if (watched == m_titleLabel && event->type() == QEvent::Resize) {
         elideTitle();
+        return false;
+    }
+
+    // QWindow::requestUpdate() is driven by the Wayland frame callback. The
+    // position requested before this event is now the one against which new
+    // local mouse coordinates are measured. Input received earlier was still
+    // relative to the previous surface and must not be applied to this one.
+    if (watched == windowHandle() && event->type() == QEvent::UpdateRequest
+        && m_dragging && m_dragAwaitingFrame) {
+        m_dragConfirmedPos = QPoint(m_note.x, m_note.y);
+        m_dragAwaitingFrame = false;
+        m_dragNeedsFreshInput = true;
         return false;
     }
 
@@ -1802,10 +1900,22 @@ void NoteWindow::mousePressEvent(QMouseEvent *event)
     }
 
     if (titleBarContains(pos)) {
+        // A locked note stays where it is: the press is consumed without
+        // starting a drag. Editing, hiding and the context menu keep working.
+        if (m_note.locked) {
+            event->accept();
+            return;
+        }
         m_dragging = true;
         m_dragRefLocal = pos;
+        m_dragPendingPos = pos;
+        m_dragAppliedPos = pos;
+        m_dragConfirmedPos = QPoint(m_note.x, m_note.y);
+        m_dragAwaitingFrame = false;
+        m_dragNeedsFreshInput = false;
         clearDragHolds();
         setCursor(Qt::ClosedHandCursor);
+        m_dragTimer->start();
         event->accept();
         return;
     }
@@ -1822,7 +1932,10 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
     if ((m_dragging || m_resizing) && !(event->buttons() & Qt::LeftButton)) {
         const bool wasDragging = m_dragging;
         m_dragging = false;
+        m_dragAwaitingFrame = false;
+        m_dragNeedsFreshInput = false;
         m_resizing = false;
+        m_dragTimer->stop();
         clearResizeHolds();
         clearDragHolds();
         unsetCursor();
@@ -1834,82 +1947,12 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
     }
 
     if (m_dragging) {
-        // Freeze the card on the first real movement only (a click or the first
-        // click of a double click must not pay the grab nor flicker).
-        if (m_dragSnapshot.isNull())
-            beginDragVisuals();
-
-        // LOCAL coordinate with a FIXED reference to the grab point: on Wayland
-        // it is the only reliable one. For it to work, the surface must REALLY
-        // move on every event: applyMargins() forces a full commit
-        // (commitLayerSurface()), otherwise the surface stays still, the local
-        // coordinate keeps growing and the delta accumulates until it
-        // "explodes". See applyMargins().
-        const QPoint delta = pos - m_dragRefLocal;
-        if (!delta.isNull() && !m_snapEnabled) {
-            // Snapping off: free movement, the original path untouched.
-            m_note.x += delta.x();
-            m_note.y += delta.y();
-            clampToScreen();
-            applyMargins();
-        } else if (!delta.isNull()) {
-            // The note pauses as soon as one of its edges meets the homologous
-            // edge of a nearby note (left-left, right-right, top-top,
-            // bottom-bottom): see dragHoldPos(). Notes only need to be near on
-            // the other axis (same kSnapRange as the resize).
-            const int visualH = m_collapsed ? kTitleHeight : m_note.h;
-            const int prevX = m_note.x;
-            const int prevY = m_note.y;
-            const int freeX = prevX + delta.x();
-            const int freeY = prevY + delta.y();
-            // The note occupies its current position: the free target is only
-            // used to find the edge crossings below. Peer edges come from
-            // globalNoteRect() in global coordinates, while m_note.x/y (and so
-            // prevX/freeX) are relative to the available area of this note's
-            // screen: convert the peer edges to the same local frame before
-            // giving them to dragHoldPos(), otherwise the snap is off by the
-            // screen origin (a top/left panel, or another monitor).
-            const QPoint origin = m_screenRect.topLeft();
-            const QRect ours(origin + QPoint(prevX, prevY),
-                             QSize(m_note.w, visualH));
-
-            QList<int> peerLefts;
-            QList<int> peerRights;
-            QList<int> peerTops;
-            QList<int> peerBottoms;
-            for (NoteWindow *peer : g_noteWindows) {
-                if (peer == this || !peer->isVisible())
-                    continue;
-                const QRect r = peer->globalNoteRect();
-                if (intervalsNear(ours.top(), ours.top() + ours.height(),
-                                  r.top(), r.top() + r.height(), kSnapRange)) {
-                    peerLefts.append(r.left() - origin.x());
-                    peerRights.append(r.left() + r.width() - origin.x());
-                }
-                if (intervalsNear(ours.left(), ours.left() + ours.width(),
-                                  r.left(), r.left() + r.width(), kSnapRange)) {
-                    peerTops.append(r.top() - origin.y());
-                    peerBottoms.append(r.top() + r.height() - origin.y());
-                }
-            }
-
-            m_note.x = dragHoldPos(m_dragHoldX, freeX, prevX, m_note.w,
-                                   peerLefts, peerRights);
-            m_note.y = dragHoldPos(m_dragHoldY, freeY, prevY, visualH,
-                                   peerTops, peerBottoms);
-            const QString oldKey = m_screenKey;
-            clampToScreen();
-            // A screen change (or the clamp) invalidates the held position.
-            if (m_screenKey != oldKey) {
-                clearDragHolds();
-            } else {
-                if (m_dragHoldX.active && m_note.x != m_dragHoldX.heldPos)
-                    m_dragHoldX = DragHold();
-                if (m_dragHoldY.active && m_note.y != m_dragHoldY.heldPos)
-                    m_dragHoldY = DragHold();
-            }
-            applyMargins();
-        }
+        // Store only the latest pointer position: applyDragMove() commits it at
+        // most once per frame, so the surface has time to move before the next
+        // delta is computed (see kDragUpdateMs).
+        m_dragPendingPos = pos;
+        if (!m_dragAwaitingFrame)
+            m_dragNeedsFreshInput = false;
         event->accept();
         return;
     }
@@ -1968,10 +2011,115 @@ void NoteWindow::mouseMoveEvent(QMouseEvent *event)
     QWidget::mouseMoveEvent(event);
 }
 
+void NoteWindow::applyDragMove()
+{
+    if (!m_dragging || m_dragAwaitingFrame || m_dragNeedsFreshInput)
+        return;
+
+    const QPoint pos = m_dragPendingPos;
+    if (pos == m_dragAppliedPos)
+        return;
+
+    const QPoint delta = pos - m_dragRefLocal;
+    if (delta.isNull()) {
+        m_dragAppliedPos = pos;
+        return;
+    }
+
+    // Freeze the card on the first real movement only (a click or the first
+    // click of a double click must not pay the grab nor flicker).
+    if (m_dragSnapshot.isNull())
+        beginDragVisuals();
+
+    const QString previousScreenKey = m_screenKey;
+
+    // LOCAL coordinate with a FIXED reference to the grab point. Its base is
+    // the last position confirmed by a frame update, not merely the latest
+    // requested position (see m_dragConfirmedPos).
+    if (!m_snapEnabled) {
+        // Snapping off: free movement, the original path untouched.
+        const int beforeX = m_dragConfirmedPos.x();
+        const int beforeY = m_dragConfirmedPos.y();
+        m_note.x = beforeX + delta.x();
+        m_note.y = beforeY + delta.y();
+        clampToScreen();
+        applyMargins();
+    } else {
+        // The note pauses as soon as one of its edges meets the homologous edge
+        // of a nearby note (left-left, right-right, top-top, bottom-bottom): see
+        // dragHoldPos(). Notes only need to be near on the other axis (same
+        // kSnapRange as the resize).
+        const int visualH = m_collapsed ? kTitleHeight : m_note.h;
+        const int prevX = m_dragConfirmedPos.x();
+        const int prevY = m_dragConfirmedPos.y();
+        const int freeX = prevX + delta.x();
+        const int freeY = prevY + delta.y();
+        // The note occupies its current position: the free target is only used
+        // to find the edge crossings below. Peer edges come from
+        // globalNoteRect() in global coordinates, while m_note.x/y (and so
+        // prevX/freeX) are relative to the available area of this note's
+        // screen: convert the peer edges to the same local frame before giving
+        // them to dragHoldPos(), otherwise the snap is off by the screen origin
+        // (a top/left panel, or another monitor).
+        const QPoint origin = m_screenRect.topLeft();
+        const QRect ours(origin + QPoint(prevX, prevY), QSize(m_note.w, visualH));
+
+        QList<int> peerLefts;
+        QList<int> peerRights;
+        QList<int> peerTops;
+        QList<int> peerBottoms;
+        for (NoteWindow *peer : g_noteWindows) {
+            if (peer == this || !peer->isVisible())
+                continue;
+            const QRect r = peer->globalNoteRect();
+            if (intervalsNear(ours.top(), ours.top() + ours.height(),
+                              r.top(), r.top() + r.height(), kSnapRange)) {
+                peerLefts.append(r.left() - origin.x());
+                peerRights.append(r.left() + r.width() - origin.x());
+            }
+            if (intervalsNear(ours.left(), ours.left() + ours.width(),
+                              r.left(), r.left() + r.width(), kSnapRange)) {
+                peerTops.append(r.top() - origin.y());
+                peerBottoms.append(r.top() + r.height() - origin.y());
+            }
+        }
+
+        m_note.x = dragHoldPos(m_dragHoldX, freeX, prevX, m_note.w,
+                               peerLefts, peerRights);
+        m_note.y = dragHoldPos(m_dragHoldY, freeY, prevY, visualH,
+                               peerTops, peerBottoms);
+        const QString oldKey = m_screenKey;
+        clampToScreen();
+        // A screen change (or the clamp) invalidates the held position.
+        if (m_screenKey != oldKey) {
+            clearDragHolds();
+        } else {
+            if (m_dragHoldX.active && m_note.x != m_dragHoldX.heldPos)
+                m_dragHoldX = DragHold();
+            if (m_dragHoldY.active && m_note.y != m_dragHoldY.heldPos)
+                m_dragHoldY = DragHold();
+        }
+        applyMargins();
+    }
+
+    if (QPoint(m_note.x, m_note.y) != m_dragConfirmedPos
+        || m_screenKey != previousScreenKey) {
+        m_dragAwaitingFrame = true;
+        if (QWindow *wh = windowHandle())
+            wh->requestUpdate();
+    }
+
+    m_dragAppliedPos = pos;
+}
+
 void NoteWindow::mouseReleaseEvent(QMouseEvent *event)
 {
     if (m_dragging) {
+        m_dragTimer->stop();
+        applyDragMove();   // flush fresh input; stale pre-frame input is discarded
         m_dragging = false;
+        m_dragAwaitingFrame = false;
+        m_dragNeedsFreshInput = false;
         clearDragHolds();
         unsetCursor();
         clampToScreen();
@@ -2160,6 +2308,145 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     QMenu menu;
     const QTextCharFormat cur = m_body->currentCharFormat();
 
+    // Each section is a QWidgetAction embedding a dimmed title and a horizontal
+    // strip of icon-only buttons (as in Kate's context menu). The menu stays open
+    // while the buttons are clicked, letting the user apply several formats in
+    // one go; each click resyncs the checked state from the document, because
+    // these are QToolButtons and not QActions.
+    const QString sectionStyle = QStringLiteral(
+        "QToolButton { border: none; border-radius: 4px; padding: 2px; }"
+        "QToolButton:hover { background-color: palette(midlight); }"
+        "QToolButton:checked { background-color: palette(mid); }");
+
+    struct MenuSection
+    {
+        QWidget *row = nullptr;
+        QHBoxLayout *layout = nullptr;
+    };
+
+    auto makeSection = [&](const QString &title) {
+        MenuSection section;
+        section.row = new QWidget(&menu);
+        section.layout = new QHBoxLayout(section.row);
+        section.layout->setContentsMargins(12, 2, 12, 2);
+        section.layout->setSpacing(2);
+        section.row->setStyleSheet(sectionStyle);
+
+        auto *label = new QLabel(title, section.row);
+        label->setForegroundRole(QPalette::PlaceholderText);
+        section.layout->addWidget(label);
+        section.layout->addStretch();
+        return section;
+    };
+
+    auto makeSectionButton = [&](const MenuSection &section, const QString &iconName,
+                                 const QString &label, const QKeySequence &shortcut,
+                                 bool checkable, bool checked) {
+        auto *button = new QToolButton(section.row);
+        button->setAutoRaise(true);
+        button->setCheckable(checkable);
+        button->setChecked(checked);
+        button->setIcon(menuIcon(iconName));
+        button->setIconSize(QSize(18, 18));
+        button->setFixedSize(26, 26);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setAccessibleName(label);
+        QString tip = label;
+        if (!shortcut.isEmpty())
+            tip += QStringLiteral(" (%1)").arg(shortcut.toString(QKeySequence::NativeText));
+        button->setToolTip(tip);
+        section.layout->addWidget(button);
+        return button;
+    };
+
+    const MenuSection styleSection = makeSection(I18n::t(QStringLiteral("format.style")));
+    QToolButton *bold = makeSectionButton(styleSection, QStringLiteral("format-text-bold"),
+                                          I18n::t(QStringLiteral("format.bold")),
+                                          QKeySequence::Bold, true,
+                                          cur.fontWeight() == QFont::Bold);
+    QToolButton *ital = makeSectionButton(styleSection, QStringLiteral("format-text-italic"),
+                                          I18n::t(QStringLiteral("format.italic")),
+                                          QKeySequence::Italic, true, cur.fontItalic());
+    QToolButton *under = makeSectionButton(styleSection,
+                                           QStringLiteral("format-text-underline"),
+                                           I18n::t(QStringLiteral("format.underline")),
+                                           QKeySequence::Underline, true, cur.fontUnderline());
+    QToolButton *strike = makeSectionButton(styleSection,
+                                            QStringLiteral("format-text-strikethrough"),
+                                            I18n::t(QStringLiteral("format.strikethrough")),
+                                            QKeySequence(), true, cur.fontStrikeOut());
+    QToolButton *clear = makeSectionButton(styleSection, QStringLiteral("draw-eraser"),
+                                           I18n::t(QStringLiteral("format.clear")),
+                                           QKeySequence(), false, false);
+
+    const auto syncStyleButtons = [this, bold, ital, under, strike] {
+        const QTextCharFormat fmt = m_body->currentCharFormat();
+        bold->setChecked(fmt.fontWeight() == QFont::Bold);
+        ital->setChecked(fmt.fontItalic());
+        under->setChecked(fmt.fontUnderline());
+        strike->setChecked(fmt.fontStrikeOut());
+    };
+
+    connect(bold, &QToolButton::clicked, this, [this, syncStyleButtons] {
+        toggleBold();
+        syncStyleButtons();
+    });
+    connect(ital, &QToolButton::clicked, this, [this, syncStyleButtons] {
+        toggleItalic();
+        syncStyleButtons();
+    });
+    connect(under, &QToolButton::clicked, this, [this, syncStyleButtons] {
+        toggleUnderline();
+        syncStyleButtons();
+    });
+    connect(strike, &QToolButton::clicked, this, [this, syncStyleButtons] {
+        toggleStrike();
+        syncStyleButtons();
+    });
+    connect(clear, &QToolButton::clicked, this, [this, syncStyleButtons] {
+        clearFormatting();
+        syncStyleButtons();
+    });
+
+    auto *styleAction = new QWidgetAction(&menu);
+    styleAction->setDefaultWidget(styleSection.row);
+    menu.addAction(styleAction);
+
+    // Paragraph section: the two list styles as icon-only buttons, like Stile.
+    const MenuSection paragraphSection =
+        makeSection(I18n::t(QStringLiteral("format.paragraph")));
+    QToolButton *bullets = makeSectionButton(
+        paragraphSection, QStringLiteral("format-list-unordered"),
+        I18n::t(QStringLiteral("format.bulleted_list")), QKeySequence(), true, false);
+    QToolButton *numbers = makeSectionButton(
+        paragraphSection, QStringLiteral("format-list-ordered"),
+        I18n::t(QStringLiteral("format.numbered_list")), QKeySequence(), true, false);
+
+    const auto syncListButtons = [this, bullets, numbers] {
+        const QTextList *list = m_body->textCursor().currentList();
+        const QTextListFormat::Style listStyle = list
+                                                     ? list->format().style()
+                                                     : QTextListFormat::ListStyleUndefined;
+        bullets->setChecked(listStyle == QTextListFormat::ListDisc);
+        numbers->setChecked(listStyle == QTextListFormat::ListDecimal);
+    };
+    syncListButtons();
+
+    connect(bullets, &QToolButton::clicked, this, [this, syncListButtons] {
+        makeList(false);
+        syncListButtons();
+    });
+    connect(numbers, &QToolButton::clicked, this, [this, syncListButtons] {
+        makeList(true);
+        syncListButtons();
+    });
+
+    auto *paragraphAction = new QWidgetAction(&menu);
+    paragraphAction->setDefaultWidget(paragraphSection.row);
+    menu.addAction(paragraphAction);
+
+    menu.addSeparator();
+
     // Clipboard. The plain paste drops the HTML (colors, backgrounds, fonts)
     // copied from a web page; Ctrl+Shift+V is handled by the body itself, the
     // shortcut here is only displayed in the menu. Cut/copy follow the
@@ -2188,52 +2475,6 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     plainPaste->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+V")));
     plainPaste->setEnabled(m_body->canPaste());
     connect(plainPaste, &QAction::triggered, this, &NoteWindow::pastePlainText);
-
-    menu.addSeparator();
-
-    // Text style.
-    QAction *bold = menu.addAction(menuIcon(QStringLiteral("format-text-bold")),
-                                   I18n::t(QStringLiteral("format.bold")));
-    bold->setShortcut(QKeySequence::Bold);
-    bold->setCheckable(true);
-    bold->setChecked(cur.fontWeight() == QFont::Bold);
-    connect(bold, &QAction::triggered, this, &NoteWindow::toggleBold);
-
-    QAction *ital = menu.addAction(menuIcon(QStringLiteral("format-text-italic")),
-                                   I18n::t(QStringLiteral("format.italic")));
-    ital->setShortcut(QKeySequence::Italic);
-    ital->setCheckable(true);
-    ital->setChecked(cur.fontItalic());
-    connect(ital, &QAction::triggered, this, &NoteWindow::toggleItalic);
-
-    QAction *under = menu.addAction(menuIcon(QStringLiteral("format-text-underline")),
-                                    I18n::t(QStringLiteral("format.underline")));
-    under->setShortcut(QKeySequence::Underline);
-    under->setCheckable(true);
-    under->setChecked(cur.fontUnderline());
-    connect(under, &QAction::triggered, this, &NoteWindow::toggleUnderline);
-
-    QAction *strike = menu.addAction(menuIcon(QStringLiteral("format-text-strikethrough")),
-                                     I18n::t(QStringLiteral("format.strikethrough")));
-    strike->setCheckable(true);
-    strike->setChecked(cur.fontStrikeOut());
-    connect(strike, &QAction::triggered, this, &NoteWindow::toggleStrike);
-
-    menu.addSeparator();
-
-    // Lists and formatting reset.
-    QAction *bullets = menu.addAction(menuIcon(QStringLiteral("format-list-unordered")),
-                                      I18n::t(QStringLiteral("format.bulleted_list")));
-    connect(bullets, &QAction::triggered, this, [this] { makeList(false); });
-
-    QAction *numbers = menu.addAction(menuIcon(QStringLiteral("format-list-ordered")),
-                                      I18n::t(QStringLiteral("format.numbered_list")));
-    connect(numbers, &QAction::triggered, this, [this] { makeList(true); });
-
-    QAction *clearFormat = menu.addAction(
-        menuIcon(QStringLiteral("draw-eraser"), QStringLiteral("edit-clear")),
-        I18n::t(QStringLiteral("format.clear")));
-    connect(clearFormat, &QAction::triggered, this, &NoteWindow::clearFormatting);
 
     menu.addSeparator();
 
@@ -2285,6 +2526,17 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         menuIcon(QStringLiteral("edit-duplicate"), QStringLiteral("edit-copy")),
         I18n::t(QStringLiteral("note.duplicate")));
     connect(duplicate, &QAction::triggered, this, [this] { emit duplicateRequested(m_note.id); });
+
+    QAction *lock = menu.addAction(
+        menuIcon(QStringLiteral("object-locked"), QStringLiteral("lock")),
+        I18n::t(QStringLiteral("note.lock")));
+    lock->setCheckable(true);
+    lock->setChecked(m_note.locked);
+    connect(lock, &QAction::toggled, this, [this](bool locked) {
+        m_note.locked = locked;
+        applyLockedState();
+        emit lockedEdited(m_note.id, locked);
+    });
 
     QAction *hide = menu.addAction(menuIcon(QStringLiteral("view-hidden")),
                                    I18n::t(QStringLiteral("note.hide")));

@@ -87,6 +87,7 @@ void Storage::ensureSchema()
         " layer TEXT NOT NULL DEFAULT 'top',"
         " visible INTEGER NOT NULL DEFAULT 1,"
         " collapsed INTEGER NOT NULL DEFAULT 0,"
+        " locked INTEGER NOT NULL DEFAULT 0,"
         " scroll INTEGER NOT NULL DEFAULT 0,"
         " opacity INTEGER NOT NULL DEFAULT 100,"
         " deleted INTEGER NOT NULL DEFAULT 0,"
@@ -133,6 +134,8 @@ void Storage::ensureSchema()
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN scroll INTEGER NOT NULL DEFAULT 0"));
     if (!cols.contains(QStringLiteral("opacity")))
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN opacity INTEGER NOT NULL DEFAULT 100"));
+    if (!cols.contains(QStringLiteral("locked")))
+        q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN locked INTEGER NOT NULL DEFAULT 0"));
     if (!cols.contains(QStringLiteral("last_screen_key")))
         q.exec(QStringLiteral("ALTER TABLE notes ADD COLUMN last_screen_key TEXT NOT NULL DEFAULT ''"));
 }
@@ -161,11 +164,12 @@ Note noteFromQuery(const QSqlQuery &q)
     n.updatedAt = q.value(15).toString();
     n.deletedAt = q.value(16).toString();
     n.lastScreenKey = q.value(17).toString();
+    n.locked = q.value(18).toInt() != 0;
     return n;
 }
 
 const char *kNoteCols =
-    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,deleted,created_at,updated_at,deleted_at,last_screen_key";
+    "id,title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,deleted,created_at,updated_at,deleted_at,last_screen_key,locked";
 } // namespace
 
 QList<Note> Storage::notes(bool includeDeleted) const
@@ -199,8 +203,8 @@ qint64 Storage::insertNote(Note n)
     const QString now = nowIso();
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
-        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,deleted,last_screen_key,created_at,updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)"));
+        "INSERT INTO notes (title,content,theme,x,y,w,h,layer,visible,collapsed,scroll,opacity,deleted,last_screen_key,locked,created_at,updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)"));
     q.addBindValue(bindText(n.title));
     q.addBindValue(bindText(n.content));
     q.addBindValue(bindText(n.themeId));
@@ -214,6 +218,7 @@ qint64 Storage::insertNote(Note n)
     q.addBindValue(n.scroll);
     q.addBindValue(qBound(10, n.opacity, 100));
     q.addBindValue(bindText(n.lastScreenKey));
+    q.addBindValue(n.locked ? 1 : 0);
     q.addBindValue(now);
     q.addBindValue(now);
     if (!q.exec()) {
@@ -336,6 +341,15 @@ void Storage::updateCollapsed(qint64 id, bool collapsed)
     QSqlQuery q(db());
     q.prepare(QStringLiteral("UPDATE notes SET collapsed=? WHERE id=?"));
     q.addBindValue(collapsed ? 1 : 0);
+    q.addBindValue(id);
+    q.exec();
+}
+
+void Storage::updateLocked(qint64 id, bool locked)
+{
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE notes SET locked=? WHERE id=?"));
+    q.addBindValue(locked ? 1 : 0);
     q.addBindValue(id);
     q.exec();
 }

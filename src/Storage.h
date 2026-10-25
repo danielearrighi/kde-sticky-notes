@@ -36,6 +36,7 @@ public:
     void updateTheme(qint64 id, const QString &themeId);
     void updateLayer(qint64 id, const QString &layer);
     void updateCollapsed(qint64 id, bool collapsed);
+    void updateLocked(qint64 id, bool locked);
     void updateScroll(qint64 id, int scroll);
     void updateOpacity(qint64 id, int opacity);
     void setVisible(qint64 id, bool visible);

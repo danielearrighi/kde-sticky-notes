@@ -69,7 +69,7 @@ int main(int argc, char **argv)
 
     QString serverError;
     if (!controller.listenForSecondInstance(&serverError))
-        qWarning() << "[app] impossibile avviare l'istanza singola:" << serverError;
+        qWarning() << "[app] cannot start the single-instance server:" << serverError;
 
     controller.start(autostart);
     return app.exec();

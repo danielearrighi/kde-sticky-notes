@@ -75,6 +75,7 @@ signals:
     void themeEdited(qint64 id, const QString &themeId);
     void layerEdited(qint64 id, const QString &layer);
     void collapsedEdited(qint64 id, bool collapsed);
+    void lockedEdited(qint64 id, bool locked);
     void scrollEdited(qint64 id, int scroll);
     void opacityEdited(qint64 id, int opacity);
     void deleteRequested(qint64 id);
@@ -138,6 +139,8 @@ private:
     int dragHoldPos(DragHold &hold, int freePos, int prevPos, int size,
                     const QList<int> &nearEdges, const QList<int> &farEdges);
     void clearDragHolds();
+    /// Applies the latest pointer position at most once per kDragUpdateMs.
+    void applyDragMove();
 
     /// Commits the whole wl_surface, applying the double-buffered layer-shell
     /// state (margins, layer, keyboard interactivity). During a drag the card is
@@ -218,6 +221,9 @@ private:
     /// m_collapsed (without resizing or persisting).
     void applyCollapsedVisuals();
 
+    /// Shows/hides the lock icon in the title bar from m_note.locked.
+    void applyLockedState();
+
     // formatting
     void pastePlainText();
     void toggleBold();
@@ -239,6 +245,7 @@ private:
     /// card would drop it, so it is restored on release.
     bool m_dragRestoreBodyFocus = false;
     QWidget *m_titleBar = nullptr;
+    QLabel *m_lockIcon = nullptr;
     QLabel *m_titleLabel = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QToolButton *m_collapseButton = nullptr;
@@ -247,12 +254,23 @@ private:
     QLabel *m_resizeGrip = nullptr;
     QTimer *m_saveTimer = nullptr;
     QTimer *m_focusLayerTimer = nullptr;
+    QTimer *m_dragTimer = nullptr;
 
     bool m_collapsed = false;      // only the title bar visible
     bool m_raisedForFocus = false; // in front because it has focus
 
     bool m_dragging = false;
     QPoint m_dragRefLocal;
+    QPoint m_dragPendingPos;
+    QPoint m_dragAppliedPos;
+    /// Last layer-shell position confirmed by a frame update. m_note.x/y is the
+    /// requested position and must not be used as the local-pointer reference
+    /// while a move is still waiting for the compositor.
+    QPoint m_dragConfirmedPos;
+    bool m_dragAwaitingFrame = false;
+    /// After a frame, discard input collected against the previous surface:
+    /// only a mouse event received from now on matches m_dragConfirmedPos.
+    bool m_dragNeedsFreshInput = false;
     DragHold m_dragHoldX;
     DragHold m_dragHoldY;
     bool m_resizing = false;

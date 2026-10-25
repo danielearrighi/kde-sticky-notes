@@ -192,6 +192,9 @@ NoteWindow *AppController::ensureWindow(const Note &note)
     connect(w, &NoteWindow::collapsedEdited, this, [](qint64 id, bool collapsed) {
         Storage::instance().updateCollapsed(id, collapsed);
     });
+    connect(w, &NoteWindow::lockedEdited, this, [](qint64 id, bool locked) {
+        Storage::instance().updateLocked(id, locked);
+    });
     connect(w, &NoteWindow::scrollEdited, this, [](qint64 id, int scroll) {
         Storage::instance().updateScroll(id, scroll);
     });
