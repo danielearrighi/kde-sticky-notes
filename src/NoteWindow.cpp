@@ -23,6 +23,7 @@
 #include <QImageReader>
 #include <QBuffer>
 #include <QApplication>
+#include <QIcon>
 #include <QWindow>
 #include <QClipboard>
 #include <QDesktopServices>
@@ -593,6 +594,18 @@ protected:
 private:
     std::function<void(QPainter &)> m_paintHandler;
 };
+
+/// Icon from the desktop icon theme. Plasma's Breeze theme provides every name
+/// used by the note context menu; \a fallback covers themes that name the same
+/// action differently (e.g. "edit-copy" for a duplicate). A missing icon simply
+/// leaves the entry without one, as before.
+QIcon menuIcon(const QString &name, const QString &fallback = QString())
+{
+    const QIcon icon = QIcon::fromTheme(name);
+    if (!icon.isNull() || fallback.isEmpty())
+        return icon;
+    return QIcon::fromTheme(fallback);
+}
 
 } // namespace
 
@@ -2147,48 +2160,86 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     QMenu menu;
     const QTextCharFormat cur = m_body->currentCharFormat();
 
-    // Clipboard: paste while dropping the HTML (colors, backgrounds, fonts)
-    // copied from a web page. Ctrl+Shift+V is handled by the body itself; the
-    // shortcut here is only displayed in the menu.
-    QAction *plainPaste = menu.addAction(I18n::t(QStringLiteral("paste_plain")));
+    // Clipboard. The plain paste drops the HTML (colors, backgrounds, fonts)
+    // copied from a web page; Ctrl+Shift+V is handled by the body itself, the
+    // shortcut here is only displayed in the menu. Cut/copy follow the
+    // selection, while paste follows what the clipboard can insert.
+    const bool hasSelection = m_body->textCursor().hasSelection();
+    QAction *cut = menu.addAction(menuIcon(QStringLiteral("edit-cut")),
+                                  I18n::t(QStringLiteral("cut")));
+    cut->setShortcut(QKeySequence::Cut);
+    cut->setEnabled(hasSelection);
+    connect(cut, &QAction::triggered, m_body, &QTextEdit::cut);
+
+    QAction *copy = menu.addAction(menuIcon(QStringLiteral("edit-copy")),
+                                   I18n::t(QStringLiteral("copy")));
+    copy->setShortcut(QKeySequence::Copy);
+    copy->setEnabled(hasSelection);
+    connect(copy, &QAction::triggered, m_body, &QTextEdit::copy);
+
+    QAction *paste = menu.addAction(menuIcon(QStringLiteral("edit-paste")),
+                                    I18n::t(QStringLiteral("paste")));
+    paste->setShortcut(QKeySequence::Paste);
+    paste->setEnabled(m_body->canPaste());
+    connect(paste, &QAction::triggered, m_body, &QTextEdit::paste);
+
+    QAction *plainPaste = menu.addAction(menuIcon(QStringLiteral("edit-paste")),
+                                         I18n::t(QStringLiteral("paste_plain")));
     plainPaste->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+V")));
+    plainPaste->setEnabled(m_body->canPaste());
     connect(plainPaste, &QAction::triggered, this, &NoteWindow::pastePlainText);
 
     menu.addSeparator();
 
-    QAction *bold = menu.addAction(I18n::t(QStringLiteral("format.bold")));
+    // Text style.
+    QAction *bold = menu.addAction(menuIcon(QStringLiteral("format-text-bold")),
+                                   I18n::t(QStringLiteral("format.bold")));
     bold->setShortcut(QKeySequence::Bold);
     bold->setCheckable(true);
     bold->setChecked(cur.fontWeight() == QFont::Bold);
     connect(bold, &QAction::triggered, this, &NoteWindow::toggleBold);
 
-    QAction *ital = menu.addAction(I18n::t(QStringLiteral("format.italic")));
+    QAction *ital = menu.addAction(menuIcon(QStringLiteral("format-text-italic")),
+                                   I18n::t(QStringLiteral("format.italic")));
     ital->setShortcut(QKeySequence::Italic);
     ital->setCheckable(true);
     ital->setChecked(cur.fontItalic());
     connect(ital, &QAction::triggered, this, &NoteWindow::toggleItalic);
 
-    QAction *under = menu.addAction(I18n::t(QStringLiteral("format.underline")));
+    QAction *under = menu.addAction(menuIcon(QStringLiteral("format-text-underline")),
+                                    I18n::t(QStringLiteral("format.underline")));
     under->setShortcut(QKeySequence::Underline);
     under->setCheckable(true);
     under->setChecked(cur.fontUnderline());
     connect(under, &QAction::triggered, this, &NoteWindow::toggleUnderline);
 
-    QAction *strike = menu.addAction(I18n::t(QStringLiteral("format.strikethrough")));
+    QAction *strike = menu.addAction(menuIcon(QStringLiteral("format-text-strikethrough")),
+                                     I18n::t(QStringLiteral("format.strikethrough")));
     strike->setCheckable(true);
     strike->setChecked(cur.fontStrikeOut());
     connect(strike, &QAction::triggered, this, &NoteWindow::toggleStrike);
 
     menu.addSeparator();
-    connect(menu.addAction(I18n::t(QStringLiteral("format.bulleted_list"))), &QAction::triggered,
-            this, [this] { makeList(false); });
-    connect(menu.addAction(I18n::t(QStringLiteral("format.numbered_list"))), &QAction::triggered,
-            this, [this] { makeList(true); });
-    connect(menu.addAction(I18n::t(QStringLiteral("format.clear"))), &QAction::triggered,
-            this, &NoteWindow::clearFormatting);
+
+    // Lists and formatting reset.
+    QAction *bullets = menu.addAction(menuIcon(QStringLiteral("format-list-unordered")),
+                                      I18n::t(QStringLiteral("format.bulleted_list")));
+    connect(bullets, &QAction::triggered, this, [this] { makeList(false); });
+
+    QAction *numbers = menu.addAction(menuIcon(QStringLiteral("format-list-ordered")),
+                                      I18n::t(QStringLiteral("format.numbered_list")));
+    connect(numbers, &QAction::triggered, this, [this] { makeList(true); });
+
+    QAction *clearFormat = menu.addAction(
+        menuIcon(QStringLiteral("draw-eraser"), QStringLiteral("edit-clear")),
+        I18n::t(QStringLiteral("format.clear")));
+    connect(clearFormat, &QAction::triggered, this, &NoteWindow::clearFormatting);
 
     menu.addSeparator();
-    QMenu *colors = menu.addMenu(I18n::t(QStringLiteral("note.color")));
+
+    // Appearance of the note.
+    QMenu *colors = menu.addMenu(menuIcon(QStringLiteral("format-fill-color")),
+                                 I18n::t(QStringLiteral("note.color")));
     for (const Theme &t : Storage::instance().themes()) {
         QAction *a = colors->addAction(UiHelpers::swatchIcon(t.body), Themes::displayName(t));
         a->setCheckable(true);
@@ -2200,7 +2251,8 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         });
     }
 
-    QMenu *opacity = menu.addMenu(I18n::t(QStringLiteral("note.opacity")));
+    QMenu *opacity = menu.addMenu(menuIcon(QStringLiteral("edit-opacity")),
+                                  I18n::t(QStringLiteral("note.opacity")));
     for (int pct = 100; pct >= 10; pct -= 10) {
         QAction *a = opacity->addAction(QStringLiteral("%1%").arg(pct));
         a->setCheckable(true);
@@ -2212,7 +2264,8 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         });
     }
 
-    QAction *ontop = menu.addAction(I18n::t(QStringLiteral("note.always_on_top")));
+    QAction *ontop = menu.addAction(menuIcon(QStringLiteral("window-keep-above")),
+                                    I18n::t(QStringLiteral("note.always_on_top")));
     ontop->setCheckable(true);
     ontop->setChecked(isAlwaysOnTop());
     connect(ontop, &QAction::triggered, this, [this] {
@@ -2222,18 +2275,34 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     });
 
     menu.addSeparator();
-    connect(menu.addAction(I18n::t(QStringLiteral("new_note"))), &QAction::triggered,
-            this, &NoteWindow::newNoteRequested);
-    connect(menu.addAction(I18n::t(QStringLiteral("note.duplicate"))), &QAction::triggered,
-            this, [this] { emit duplicateRequested(m_note.id); });
-    connect(menu.addAction(I18n::t(QStringLiteral("note.hide"))), &QAction::triggered,
-            this, [this] { emit hideRequested(m_note.id); });
+
+    // Actions on the note.
+    QAction *newNote = menu.addAction(menuIcon(QStringLiteral("document-new")),
+                                      I18n::t(QStringLiteral("new_note")));
+    connect(newNote, &QAction::triggered, this, &NoteWindow::newNoteRequested);
+
+    QAction *duplicate = menu.addAction(
+        menuIcon(QStringLiteral("edit-duplicate"), QStringLiteral("edit-copy")),
+        I18n::t(QStringLiteral("note.duplicate")));
+    connect(duplicate, &QAction::triggered, this, [this] { emit duplicateRequested(m_note.id); });
+
+    QAction *hide = menu.addAction(menuIcon(QStringLiteral("view-hidden")),
+                                   I18n::t(QStringLiteral("note.hide")));
+    connect(hide, &QAction::triggered, this, [this] { emit hideRequested(m_note.id); });
 
     menu.addSeparator();
-    connect(menu.addAction(I18n::t(QStringLiteral("note.delete_to_trash"))), &QAction::triggered,
-            this, [this] { emit deleteRequested(m_note.id); });
-    connect(menu.addAction(I18n::t(QStringLiteral("note.settings"))), &QAction::triggered,
-            this, &NoteWindow::settingsRequested);
+
+    QAction *remove = menu.addAction(
+        menuIcon(QStringLiteral("user-trash"), QStringLiteral("edit-delete")),
+        I18n::t(QStringLiteral("note.delete_to_trash")));
+    connect(remove, &QAction::triggered, this, [this] { emit deleteRequested(m_note.id); });
+
+    menu.addSeparator();
+
+    QAction *settings = menu.addAction(
+        menuIcon(QStringLiteral("settings-configure"), QStringLiteral("configure")),
+        I18n::t(QStringLiteral("note.settings")));
+    connect(settings, &QAction::triggered, this, &NoteWindow::settingsRequested);
 
     menu.exec(globalPos);
 }
