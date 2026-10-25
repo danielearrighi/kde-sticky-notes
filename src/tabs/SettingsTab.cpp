@@ -11,6 +11,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFont>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -108,6 +109,20 @@ void SettingsTab::buildUi()
     m_confirmDelete = new QCheckBox(I18n::t(QStringLiteral("settings.confirm_delete")));
     m_closeToTray = new QCheckBox(I18n::t(QStringLiteral("settings.close_to_tray")));
     m_closeToTray->setToolTip(I18n::t(QStringLiteral("settings.close_to_tray_tooltip")));
+
+    // Tray icon: presets plus an image file. Only meaningful while the app can
+    // stay in the tray, but the choice is kept either way.
+    m_trayIcon = new QComboBox;
+    m_trayIcon->addItem(I18n::t(QStringLiteral("settings.tray_icon_auto")), UiHelpers::trayIconAuto());
+    m_trayIcon->addItem(I18n::t(QStringLiteral("settings.tray_icon_app")), UiHelpers::trayIconApp());
+    m_trayIcon->addItem(I18n::t(QStringLiteral("settings.tray_icon_custom")), UiHelpers::trayIconCustom());
+    m_trayIcon->setToolTip(I18n::t(QStringLiteral("settings.tray_icon_tooltip")));
+    m_trayIconPreview = new QLabel;
+    m_trayIconPreview->setFixedSize(24, 24);
+    m_trayIconPreview->setAlignment(Qt::AlignCenter);
+    m_trayIconChoose = new QPushButton(I18n::t(QStringLiteral("settings.tray_icon_choose")));
+    m_trayIconChoose->setCursor(Qt::PointingHandCursor);
+
     m_snap = new QCheckBox(I18n::t(QStringLiteral("settings.snap")));
     m_snap->setToolTip(I18n::t(QStringLiteral("settings.snap_tooltip")));
     m_updateCheck = new QCheckBox(I18n::t(QStringLiteral("settings.check_updates")));
@@ -137,6 +152,15 @@ void SettingsTab::buildUi()
     form->addRow(QString(), m_autostart);
     form->addRow(QString(), m_confirmDelete);
     form->addRow(QString(), m_closeToTray);
+
+    auto *trayRow = new QHBoxLayout;
+    trayRow->setContentsMargins(0, 0, 0, 0);
+    trayRow->addWidget(m_trayIconPreview);
+    trayRow->addWidget(m_trayIcon);
+    trayRow->addWidget(m_trayIconChoose);
+    trayRow->addStretch();
+    form->addRow(I18n::t(QStringLiteral("settings.tray_icon")), trayRow);
+
     form->addRow(QString(), m_snap);
     form->addRow(QString(), m_updateCheck);
 
@@ -223,6 +247,7 @@ void SettingsTab::buildUi()
         Storage::instance().setSetting(QStringLiteral("autostart"), m_autostart->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         Storage::instance().setSetting(QStringLiteral("confirm_delete"), m_confirmDelete->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         Storage::instance().setSetting(QStringLiteral("close_to_tray"), m_closeToTray->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
+        Storage::instance().setSetting(QStringLiteral("tray_icon"), m_trayIcon->currentData().toString());
         Storage::instance().setSetting(QStringLiteral("snap"), m_snap->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         Storage::instance().setSetting(QStringLiteral("update_check"), m_updateCheck->isChecked() ? QStringLiteral("1") : QStringLiteral("0"));
         emit settingsChanged();
@@ -264,6 +289,22 @@ void SettingsTab::buildUi()
     });
     connect(m_closeToTray, &QCheckBox::toggled, this, [save](bool checked) {
         save(QStringLiteral("close_to_tray"), checked ? QStringLiteral("1") : QStringLiteral("0"));
+    });
+    connect(m_trayIcon, &QComboBox::activated, this, [this, save] {
+        save(QStringLiteral("tray_icon"), m_trayIcon->currentData().toString());
+        updateTrayIconPreview();
+    });
+    connect(m_trayIconChoose, &QPushButton::clicked, this, [this, save] {
+        QString start = Storage::instance().setting(QStringLiteral("tray_icon_path"));
+        if (start.isEmpty() || !QFileInfo::exists(start))
+            start = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+        const QString path = QFileDialog::getOpenFileName(
+            this, I18n::t(QStringLiteral("settings.tray_icon_pick_title")), start,
+            I18n::t(QStringLiteral("settings.tray_icon_filter")));
+        if (path.isEmpty())
+            return;
+        save(QStringLiteral("tray_icon_path"), path);
+        updateTrayIconPreview();
     });
     connect(m_snap, &QCheckBox::toggled, this, [save](bool checked) {
         save(QStringLiteral("snap"), checked ? QStringLiteral("1") : QStringLiteral("0"));
@@ -520,6 +561,10 @@ void SettingsTab::loadIntoUi()
     m_autostart->setChecked(Storage::instance().setting(QStringLiteral("autostart"), QStringLiteral("0")) == QLatin1String("1"));
     m_confirmDelete->setChecked(Storage::instance().setting(QStringLiteral("confirm_delete"), QStringLiteral("1")) != QLatin1String("0"));
     m_closeToTray->setChecked(Storage::instance().setting(QStringLiteral("close_to_tray"), QStringLiteral("0")) == QLatin1String("1"));
+    const QString trayMode = Storage::instance().setting(QStringLiteral("tray_icon"), UiHelpers::trayIconAuto());
+    const int trayIndex = m_trayIcon->findData(trayMode);
+    m_trayIcon->setCurrentIndex(trayIndex >= 0 ? trayIndex : 0);
+    updateTrayIconPreview();
     m_snap->setChecked(Storage::instance().setting(QStringLiteral("snap"), QStringLiteral("1")) == QLatin1String("1"));
     m_updateCheck->setChecked(Storage::instance().setting(QStringLiteral("update_check"), QStringLiteral("1")) == QLatin1String("1"));
 
@@ -544,4 +589,16 @@ void SettingsTab::loadIntoUi()
     // empty (and "save" does nothing) until the user clicks another theme.
     if (QListWidgetItem *cur = m_themeList->currentItem())
         loadThemeIntoEditor(cur->data(Qt::UserRole).toString());
+}
+
+void SettingsTab::updateTrayIconPreview()
+{
+    const QString mode = m_trayIcon->currentData().toString();
+    const QString path = Storage::instance().setting(QStringLiteral("tray_icon_path"));
+    m_trayIconChoose->setEnabled(mode == UiHelpers::trayIconCustom());
+    const QIcon icon = UiHelpers::trayIcon(mode, path);
+    m_trayIconPreview->setPixmap(icon.pixmap(QSize(24, 24), devicePixelRatioF()));
+    m_trayIconPreview->setToolTip(mode == UiHelpers::trayIconCustom() && !path.isEmpty()
+                                      ? path
+                                      : I18n::t(QStringLiteral("settings.tray_icon_tooltip")));
 }

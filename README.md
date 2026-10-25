@@ -111,7 +111,8 @@ start, so a broken update can be recovered by hand.
 - **Info** — Qt/libraries versions, the data path, the author and the update
   check (a new version can be downloaded and installed from there).
 - **Autostart and tray** — start the notes at login; optionally keep the app
-  running in the system tray when the hub is closed.
+  running in the system tray when the hub is closed, and pick the tray icon
+  (automatic, colored or a custom image).
 - **Single instance** — launching the app again just brings the hub to the front.
 - **Languages** — English, Italian and Spanish
 

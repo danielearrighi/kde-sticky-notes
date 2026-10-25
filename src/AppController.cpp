@@ -12,15 +12,11 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QMenu>
-#include <QPainter>
-#include <QPalette>
-#include <QPixmap>
 #include <QStandardPaths>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
 #include <QMessageBox>
-#include <QIcon>
 #include <QRandomGenerator>
 #include <QScreen>
 #include <QSystemTrayIcon>
@@ -30,30 +26,6 @@
 
 namespace {
 const char *kServerName = "sticky-notes-single-instance";
-
-// Monochrome note glyph for the tray, tinted with the theme foreground so it
-// matches the Plasma panel: white on the default dark theme, dark on a light
-// one. Falls back to the colored app icon if the SVG cannot be rendered.
-QIcon themedTrayIcon()
-{
-    const QPixmap mask = QIcon(QStringLiteral(":/icons/sticky-notes-symbolic.svg")).pixmap(64, 64);
-    if (mask.isNull())
-        return QIcon(QStringLiteral(":/icons/sticky-notes.png"));
-
-    QColor fg = QApplication::palette().color(QPalette::WindowText);
-    if (!fg.isValid() || fg.alpha() == 0)
-        fg = Qt::white;
-
-    QPixmap tinted(mask.size());
-    tinted.fill(Qt::transparent);
-    QPainter painter(&tinted);
-    painter.drawPixmap(0, 0, mask);
-    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-    painter.fillRect(tinted.rect(), fg);
-    painter.end();
-
-    return QIcon(tinted);
-}
 } // namespace
 
 AppController::AppController(QObject *parent)
@@ -419,6 +391,7 @@ void AppController::onSettingsChanged()
         w->setSnappingEnabled(snap);
     }
     applyAutostart();
+    updateTrayIcon();
     updateTrayVisibility();
 }
 
@@ -439,6 +412,9 @@ void AppController::onBackupRestored()
     for (const Note &n : Storage::instance().notes(false))
         if (n.visible)
             ensureWindow(n);
+
+    // A backup carries the settings too: follow the restored tray icon.
+    updateTrayIcon();
 
     if (m_hub)
         m_hub->refresh();
@@ -518,7 +494,11 @@ void AppController::setupTray()
     if (!QSystemTrayIcon::isSystemTrayAvailable())
         return;
 
-    m_tray = new QSystemTrayIcon(themedTrayIcon(), this);
+    m_tray = new QSystemTrayIcon(UiHelpers::trayIcon(
+                                     Storage::instance().setting(QStringLiteral("tray_icon"),
+                                                                 UiHelpers::trayIconAuto()),
+                                     Storage::instance().setting(QStringLiteral("tray_icon_path"))),
+                                 this);
     m_tray->setToolTip(QStringLiteral("Sticky Notes"));
 
     // Follow Plasma color-scheme changes: retint the glyph with the new
@@ -562,10 +542,21 @@ void AppController::updateTrayVisibility()
     m_tray->setVisible(Storage::instance().setting(QStringLiteral("close_to_tray"), QStringLiteral("0")) == QLatin1String("1"));
 }
 
+void AppController::updateTrayIcon()
+{
+    if (!m_tray)
+        return;
+    m_tray->setIcon(UiHelpers::trayIcon(
+        Storage::instance().setting(QStringLiteral("tray_icon"), UiHelpers::trayIconAuto()),
+        Storage::instance().setting(QStringLiteral("tray_icon_path"))));
+}
+
 bool AppController::eventFilter(QObject *watched, QEvent *event)
 {
-    if (event->type() == QEvent::ApplicationPaletteChange && m_tray)
-        m_tray->setIcon(themedTrayIcon());
+    if (event->type() == QEvent::ApplicationPaletteChange && m_tray
+        && Storage::instance().setting(QStringLiteral("tray_icon"), UiHelpers::trayIconAuto())
+               == UiHelpers::trayIconAuto())
+        updateTrayIcon();
     return QObject::eventFilter(watched, event);
 }
 

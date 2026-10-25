@@ -3,8 +3,10 @@
 #include "I18n.h"
 #include "Storage.h"
 
+#include <QApplication>
 #include <QColor>
 #include <QDateTime>
+#include <QImage>
 #include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
@@ -68,6 +70,49 @@ QIcon randomSwatchIcon()
         p.drawRoundedRect(QRectF(1 + (i % 2) * 6, 1 + (i / 2) * 6, 6, 6), 2, 2);
     }
     p.end();
+    return QIcon(pm);
+}
+
+QIcon trayIcon(const QString &mode, const QString &path)
+{
+    if (mode == trayIconApp())
+        return QIcon(QStringLiteral(":/icons/sticky-notes.png"));
+
+    if (mode == trayIconCustom() && !path.isEmpty()) {
+        const QIcon custom(path);
+        // Unreadable/missing file: fall through to the automatic icon instead of
+        // leaving an empty slot in the panel.
+        if (!custom.isNull() && !custom.pixmap(QSize(32, 32)).isNull())
+            return custom;
+    }
+
+    // Automatic: the bundled monochrome glyph, tinted with the theme foreground
+    // (white on a dark panel, dark on a light one).
+    QImage mask = QIcon(QStringLiteral(":/icons/sticky-notes-symbolic.svg"))
+                      .pixmap(QSize(64, 64))
+                      .toImage();
+    if (mask.isNull())
+        return QIcon(QStringLiteral(":/icons/sticky-notes.png"));
+
+    QColor fg = QApplication::palette().color(QPalette::WindowText);
+    if (!fg.isValid() || fg.alpha() == 0)
+        fg = Qt::white;
+
+    QImage tinted(mask.size(), QImage::Format_ARGB32_Premultiplied);
+    tinted.fill(Qt::transparent);
+    QPainter painter(&tinted);
+    painter.drawImage(0, 0, mask);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    painter.fillRect(tinted.rect(), fg);
+    painter.end();
+
+    // One 64 px pixmap marked as 1x on purpose: the QSystemTrayIcon D-Bus
+    // exporter publishes a single entry, so multiple sizes can make it pick the
+    // smallest (16 px) and the panel then draws the icon tiny. Inheriting the
+    // application device pixel ratio is equally wrong: on HiDPI it advertises
+    // 128 px "logical" entries. A 64 px raster is scaled down by every host.
+    QPixmap pm = QPixmap::fromImage(tinted);
+    pm.setDevicePixelRatio(1.0);
     return QIcon(pm);
 }
 

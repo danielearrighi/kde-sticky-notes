@@ -62,6 +62,7 @@ private:
     void applyAutostart();
     void setupTray();
     void updateTrayVisibility();
+    void updateTrayIcon();
     bool closeToTrayEnabled() const;
     QPoint cascadePosition() const;
     void connectScreen(QScreen *screen);

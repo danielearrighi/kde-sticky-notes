@@ -35,6 +35,7 @@ signals:
 private:
     void buildUi();
     void loadIntoUi();
+    void updateTrayIconPreview();
     void loadThemeIntoEditor(const QString &themeId);
     void saveCurrentTheme();
     void restoreCurrentTheme();
@@ -57,6 +58,9 @@ private:
     QCheckBox *m_autostart = nullptr;
     QCheckBox *m_confirmDelete = nullptr;
     QCheckBox *m_closeToTray = nullptr;
+    QComboBox *m_trayIcon = nullptr;
+    QLabel *m_trayIconPreview = nullptr;
+    QPushButton *m_trayIconChoose = nullptr;
     QCheckBox *m_snap = nullptr;
     QCheckBox *m_updateCheck = nullptr;
 

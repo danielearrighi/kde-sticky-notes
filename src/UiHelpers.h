@@ -25,6 +25,17 @@ QIcon swatchIcon(const QString &hex);
 /// Multicolor variant for the "Random" entry, which has no single body color.
 QIcon randomSwatchIcon();
 
+/// Values stored in the "tray_icon" setting.
+inline QString trayIconAuto() { return QStringLiteral("auto"); }
+inline QString trayIconApp() { return QStringLiteral("app"); }
+inline QString trayIconCustom() { return QStringLiteral("custom"); }
+
+/// Icon for the system tray. "auto" is the bundled monochrome glyph tinted
+/// with the theme foreground; "app" is the colored application icon; "custom"
+/// loads \a path and falls back to "auto" when the file is missing or
+/// unreadable.
+QIcon trayIcon(const QString &mode, const QString &path);
+
 /// Default date/time format, centralized as a setting for a future i18n.
 QString defaultDateFormat();
 

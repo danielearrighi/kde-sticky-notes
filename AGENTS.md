@@ -38,10 +38,18 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   `src/tabs/` — `NotesTab` (grid), `TrashTab`, `SettingsTab` (preferences, themes
   and backup & restore), `InfoTab` — which own their own widgets and emit
   signals; `HubWindow` re-emits them so `AppController` is unchanged.
-  Shared UI helpers (`plainSnippet`, `makeCardButton`, `swatchIcon`, `untitled`,
-  date formatting) live in `UiHelpers`. `Themes` = builtin palette; `I18n` =
-  runtime translations (symbolic keys, `resources/i18n/*.json`), selected by the
-  `language` setting and applied at the next start.
+  Shared UI helpers (`plainSnippet`, `makeCardButton`, `swatchIcon`,
+  `trayIcon`, `untitled`, date formatting) live in `UiHelpers`. `Themes` = builtin
+  palette; `I18n` = runtime translations (symbolic keys, `resources/i18n/*.json`),
+  selected by the `language` setting and applied at the next start.
+- The tray icon is resolved by `UiHelpers::trayIcon()` from the `tray_icon`
+  (`auto`, `app`, `custom`) and `tray_icon_path` settings. `auto` tints the
+  bundled `sticky-notes-symbolic.svg` with the theme foreground. The icon is a
+  single 64 px pixmap forced to DPR 1: the QSystemTrayIcon D-Bus exporter
+  publishes one entry, so a multi-size icon can end up advertising the smallest
+  (16 px) and the panel draws it tiny; inheriting the application DPR is equally
+  wrong (128 px "logical" entries on HiDPI). The glyph is deliberately solid: a
+  thin outline reads smaller than the themed icons next to it at tray size.
 - `Updater` (`src/Updater.{h,cpp}`) checks
   `https://api.github.com/repos/danielearrighi/kde-sticky-notes/releases/latest`,
   verifies the asset against the release `SHA256SUMS` and replaces the running
