@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/sticky-notes.png")));
 
     // --version: print and exit, before the single-instance probe (used by
-    // packaging/updater scripts).
+    // release/updater scripts).
     if (QCoreApplication::arguments().contains(QStringLiteral("--version"))) {
         QTextStream(stdout) << QCoreApplication::applicationName() << ' '
                             << QCoreApplication::applicationVersion() << Qt::endl;

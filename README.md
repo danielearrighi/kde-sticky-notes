@@ -58,7 +58,7 @@ Install for the current user (binary, menu entry and icon, so it shows up in the
 KDE menu and the taskbar):
 
 ```bash
-./packaging/install.sh          # into ~/.local  (PREFIX=... to change it)
+./scripts/install.sh            # into ~/.local  (PREFIX=... to change it)
 ```
 
 To remove it:

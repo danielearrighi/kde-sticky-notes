@@ -4,7 +4,7 @@
 # This is the user-facing installer shipped inside the release folder (as
 # install.sh). It checks the runtime dependencies, offers to install the missing
 # ones with the system package manager, then installs the app into the user's
-# ~/.local (binary, menu entry and icon), like packaging/install.sh does from the
+# ~/.local (binary, menu entry and icon), like scripts/install.sh does from the
 # source tree.
 #
 # It expects to sit next to: sticky-notes, sticky-notes.desktop, sticky-notes.png

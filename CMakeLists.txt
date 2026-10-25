@@ -63,4 +63,4 @@ target_link_libraries(sticky-notes PRIVATE
 )
 
 install(TARGETS sticky-notes RUNTIME DESTINATION bin)
-install(FILES packaging/sticky-notes.desktop DESTINATION share/applications)
+install(FILES scripts/sticky-notes.desktop DESTINATION share/applications)

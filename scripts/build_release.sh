@@ -50,9 +50,9 @@ log() { printf '[build_release] %s\n' "$*"; }
 # --- inputs ----------------------------------------------------------------
 
 binary="$root/build/sticky-notes"
-desktop="$root/packaging/sticky-notes.desktop"
+desktop="$root/scripts/sticky-notes.desktop"
 icon="$root/resources/icons/sticky-notes.png"
-installer="$root/packaging/install-release.sh"
+installer="$root/scripts/install-release.sh"
 
 for f in "$desktop" "$icon" "$installer"; do
     [[ -f "$f" ]] || { echo "Missing required file: $f" >&2; exit 1; }

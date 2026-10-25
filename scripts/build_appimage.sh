@@ -58,7 +58,7 @@ log() { printf '[build_appimage] %s\n' "$*"; }
 # --- inputs ----------------------------------------------------------------
 
 binary="$root/build/sticky-notes"
-desktop="$root/packaging/sticky-notes.desktop"
+desktop="$root/scripts/sticky-notes.desktop"
 icon="$root/resources/icons/sticky-notes.png"
 
 for f in "$desktop" "$icon"; do

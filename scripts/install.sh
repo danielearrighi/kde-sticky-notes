@@ -22,7 +22,7 @@ install -m644 "$here/resources/icons/sticky-notes.png" "$ICON_DIR/sticky-notes.p
 
 # .desktop with an absolute Exec (works even if ~/.local/bin is not in PATH)
 sed "s|^Exec=.*|Exec=$BIN_DIR/sticky-notes|" \
-    "$here/packaging/sticky-notes.desktop" > "$APP_DIR/sticky-notes.desktop"
+    "$here/scripts/sticky-notes.desktop" > "$APP_DIR/sticky-notes.desktop"
 sed -i "s|^Icon=.*|Icon=$ICON_DIR/sticky-notes.png|" "$APP_DIR/sticky-notes.desktop"
 
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" || true

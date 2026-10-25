@@ -18,7 +18,7 @@ cmake --build build
   (Qt suppresses logs when stderr is not a terminal).
 - The app cannot be exercised on X11, GNOME, or headless: layer-shell is
   KWin (Plasma ≥ 6.6) / wlroots only. There is no test suite to substitute.
-- Install for the current user: `./packaging/install.sh` (honors `PREFIX`, default
+- Install for the current user: `./scripts/install.sh` (honors `PREFIX`, default
   `~/.local`). It expects an already-built `build/sticky-notes`.
 
 ## Architecture
