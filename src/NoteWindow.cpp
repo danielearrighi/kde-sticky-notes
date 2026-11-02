@@ -28,6 +28,13 @@
 #include <QWindow>
 #include <QClipboard>
 #include <QDesktopServices>
+#include <QFileDialog>
+#include <QSaveFile>
+#include <QStandardPaths>
+#include <QDir>
+#include <QFileInfo>
+#include <QHash>
+#include <QMessageBox>
 #include <QDebug>
 #include <QPalette>
 #include <QRegularExpression>
@@ -646,6 +653,118 @@ QPixmap tintedIconPixmap(const QIcon &icon, int size, const QColor &color, qreal
     p.fillRect(tinted.rect(), color);
     p.end();
     return tinted;
+}
+
+/// File name proposed by the Markdown export: the note title with the
+/// characters that are illegal (or problematic) in a file name on at least one
+/// supported platform replaced by spaces, then trimmed and capped. Falls back
+/// to the generic note title when nothing usable is left.
+QString exportFileName(const QString &title)
+{
+    static const QRegularExpression invalid(
+        QStringLiteral("[\\\\/:*?\"<>|\\x00-\\x1f]"));
+    QString name = title;
+    name.replace(invalid, QStringLiteral(" "));
+    name = name.simplified();
+
+    // A leading dot would make the file hidden; a trailing dot/space is
+    // rejected by some file systems.
+    while (name.startsWith(QLatin1Char('.')))
+        name.remove(0, 1);
+    while (name.endsWith(QLatin1Char('.')) || name.endsWith(QLatin1Char(' ')))
+        name.chop(1);
+
+    if (name.size() > 100) {
+        name = name.left(100).trimmed();
+        while (name.endsWith(QLatin1Char('.')))
+            name.chop(1);
+    }
+
+    if (name.isEmpty())
+        name = I18n::t(QStringLiteral("note.default_title"));
+    return name;
+}
+
+/// Extension of the file that replaces a data-URL image, from its MIME
+/// subtype. Unknown subtypes fall back to PNG, which is the format the note
+/// itself uses (see NoteWindow::insertImage()).
+QString imageFileExtension(const QString &subtype)
+{
+    const QString s = subtype.toLower();
+    if (s == QLatin1String("jpeg"))
+        return QStringLiteral("jpg");
+    if (s == QLatin1String("svg+xml"))
+        return QStringLiteral("svg");
+    if (s == QLatin1String("x-icon") || s == QLatin1String("vnd.microsoft.icon"))
+        return QStringLiteral("ico");
+    static const QSet<QString> known = {
+        QStringLiteral("png"), QStringLiteral("gif"), QStringLiteral("webp"),
+        QStringLiteral("bmp"), QStringLiteral("jpg"), QStringLiteral("svg"),
+        QStringLiteral("avif"), QStringLiteral("tif"), QStringLiteral("tiff"),
+    };
+    return known.contains(s) ? s : QStringLiteral("png");
+}
+
+/// Turns the data-URL images of \a markdown into files inside a sidecar folder
+/// next to \a markdownPath ("<note>_files/"), replacing every data URL with a
+/// percent-encoded relative link. An image that appears more than once shares
+/// the same file. Returns false (with \a errorOut set) when the folder or an
+/// image cannot be written; \a markdown may then be partially rewritten, but
+/// the caller aborts before writing it.
+bool extractMarkdownImages(QString &markdown, const QString &markdownPath,
+                           QString *errorOut)
+{
+    static const QRegularExpression dataUrlPattern(
+        QStringLiteral(R"(!\[[^\]]*\]\((data:image/([A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+))\))"));
+
+    QList<QRegularExpressionMatch> matches;
+    QRegularExpressionMatchIterator it = dataUrlPattern.globalMatch(markdown);
+    while (it.hasNext())
+        matches.append(it.next());
+    if (matches.isEmpty())
+        return true;
+
+    const QFileInfo target(markdownPath);
+    const QString folderName = target.completeBaseName() + QStringLiteral("_files");
+    const QString folderPath = target.absolutePath() + QLatin1Char('/') + folderName;
+    if (!QDir().mkpath(folderPath)) {
+        if (errorOut)
+            *errorOut = folderPath;
+        return false;
+    }
+
+    // Replacing from the last match keeps the earlier offsets valid.
+    QHash<QString, QString> written;   // data URL -> file name
+    int nextIndex = 1;
+    for (int i = matches.size() - 1; i >= 0; --i) {
+        const QRegularExpressionMatch &match = matches.at(i);
+        const QString url = match.captured(1);
+        QString fileName = written.value(url);
+        if (fileName.isEmpty()) {
+            fileName = QStringLiteral("image-%1.%2")
+                           .arg(nextIndex++)
+                           .arg(imageFileExtension(match.captured(2)));
+            const QByteArray bytes = QByteArray::fromBase64(match.captured(3).toLatin1());
+            const QString imagePath = folderPath + QLatin1Char('/') + fileName;
+            QSaveFile imageFile(imagePath);
+            if (bytes.isEmpty() || !imageFile.open(QIODevice::WriteOnly)
+                || imageFile.write(bytes) != bytes.size() || !imageFile.commit()) {
+                if (errorOut)
+                    *errorOut = bytes.isEmpty()
+                                    ? imagePath
+                                    : imagePath + QStringLiteral(": ")
+                                          + imageFile.errorString();
+                return false;
+            }
+            written.insert(url, fileName);
+        }
+        // Keep the path separator literal; spaces and non-ASCII characters are
+        // percent-encoded so the destination stays valid Markdown.
+        markdown.replace(match.capturedStart(1), match.capturedLength(1),
+                         QUrl::toPercentEncoding(folderName + QLatin1Char('/') + fileName,
+                                                 QByteArrayLiteral("/")));
+    }
+    return true;
 }
 
 } // namespace
@@ -2301,6 +2420,77 @@ void NoteWindow::pastePlainText()
     m_body->paste();
 }
 
+// -------------------------------------------------------------- export
+
+void NoteWindow::exportMarkdown()
+{
+    // The live document is exported, not m_note.content: an edit still waiting
+    // for the debounced save must end up in the file too.
+    QString text;
+    const QString title = m_note.title.trimmed();
+    if (!title.isEmpty())
+        text = QStringLiteral("# ") + title + QStringLiteral("\n\n");
+    text += m_body->document()->toMarkdown();
+    if (!text.endsWith(QLatin1Char('\n')))
+        text += QLatin1Char('\n');
+
+    // Remember the folder of the last export; fall back to Documents (or Home)
+    // on the first run or when the saved folder no longer exists.
+    QString dir = Storage::instance().setting(QStringLiteral("export_dir"));
+    if (dir.isEmpty() || !QFileInfo(dir).isDir())
+        dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir.isEmpty() || !QFileInfo(dir).isDir())
+        dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    const QString suggested = QDir(dir).filePath(exportFileName(title) + QStringLiteral(".md"));
+
+    QString path = QFileDialog::getSaveFileName(
+        this, I18n::t(QStringLiteral("note.export_title")), suggested,
+        I18n::t(QStringLiteral("note.export_filter")));
+    if (path.isEmpty())
+        return;   // cancelled
+
+    // The dialog does not append the suffix itself and the user may leave it
+    // out (or type it in another case).
+    if (!path.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
+        path += QStringLiteral(".md");
+
+    Storage::instance().setSetting(QStringLiteral("export_dir"),
+                                   QFileInfo(path).absolutePath());
+
+    // Embedded images become real files in a sidecar folder, referenced
+    // relatively: the .md stays readable and the data URLs do not bloat it.
+    QString imageError;
+    if (!extractMarkdownImages(text, path, &imageError)) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("note.export_title")),
+                             I18n::t(QStringLiteral("note.export_images_failed"))
+                                 .arg(imageError));
+        return;
+    }
+
+    // QSaveFile writes to a temporary file and replaces the target only on
+    // commit(): a failed export never leaves a truncated note behind.
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("note.export_title")),
+                             I18n::t(QStringLiteral("note.export_failed"))
+                                 .arg(file.errorString()));
+        return;
+    }
+    const QByteArray data = text.toUtf8();
+    if (file.write(data) != data.size()) {
+        const QString error = file.errorString();
+        file.cancelWriting();
+        QMessageBox::warning(this, I18n::t(QStringLiteral("note.export_title")),
+                             I18n::t(QStringLiteral("note.export_failed")).arg(error));
+        return;
+    }
+    if (!file.commit()) {
+        QMessageBox::warning(this, I18n::t(QStringLiteral("note.export_title")),
+                             I18n::t(QStringLiteral("note.export_failed"))
+                                 .arg(file.errorString()));
+    }
+}
+
 // -------------------------------------------------------------- menu
 
 void NoteWindow::buildContextMenu(const QPoint &globalPos)
@@ -2550,6 +2740,15 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         menuIcon(QStringLiteral("edit-duplicate"), QStringLiteral("edit-copy")),
         I18n::t(QStringLiteral("note.duplicate")));
     connect(duplicate, &QAction::triggered, this, [this] { emit duplicateRequested(m_note.id); });
+
+    QAction *exportMd = menu.addAction(
+        menuIcon(QStringLiteral("document-save-as"), QStringLiteral("document-export")),
+        I18n::t(QStringLiteral("note.export_markdown")));
+    // The file dialog is modal: open it once the context menu has closed,
+    // otherwise the menu would stay visible under the dialog.
+    connect(exportMd, &QAction::triggered, this, [this] {
+        QTimer::singleShot(0, this, &NoteWindow::exportMarkdown);
+    });
 
     QAction *lock = menu.addAction(
         menuIcon(QStringLiteral("object-locked"), QStringLiteral("lock")),

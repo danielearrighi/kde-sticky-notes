@@ -180,6 +180,10 @@ private:
     /// Persists the body immediately (used by the debounced m_saveTimer).
     void saveContent();
     void buildContextMenu(const QPoint &globalPos);
+    /// Writes the note as Markdown (title as H1 plus the body) to a .md file
+    /// chosen by the user. Embedded images are written to a sidecar
+    /// "<name>_files/" folder and linked relatively.
+    void exportMarkdown();
 
     /// Inserts \a image at the cursor as a PNG data URL (see the note about
     /// pasted images in NoteWindow.cpp). Returns false when the image is empty
