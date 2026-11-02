@@ -8,6 +8,12 @@
 # (scripts/build_appimage.sh) this bundle does NOT ship the Qt6/LayerShellQt
 # libraries: the target machine must already have them, so it only runs on a
 # KDE Plasma (Wayland) that also has the runtime packages.
+#
+# By default the binary is built by scripts/build_portable.sh inside an
+# ubuntu:26.04 container (Qt 6.10, LayerShellQt 6.6). That is not optional
+# pedantry: Qt is only forward compatible, and a binary built on the rolling
+# host (Qt 6.12) fails on Fedora (Qt 6.11) with "version `Qt_6.12' not found".
+# Use --native only for a local test build.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
@@ -15,13 +21,18 @@ root="$(cd "$here/.." && pwd)"                                 # repository root
 
 skip_build=0
 clean_only=0
+native_build=0
+binary_override=""
 
 usage() {
     cat <<'EOF'
 Usage: scripts/build_release.sh [options]
 
 Options:
-  --skip-build   reuse the existing build/sticky-notes (do not run CMake)
+  --binary PATH  reuse an existing binary (implies --skip-build)
+  --native       build on the host (build/sticky-notes) instead of the
+                 container; the resulting tarball may require a newer Qt
+  --skip-build   do not build, reuse the selected binary
   --clean        remove release/, then exit
   -h, --help     show this help
 EOF
@@ -29,6 +40,8 @@ EOF
 
 while (($#)); do
     case "$1" in
+        --binary)     binary_override="${2:?--binary needs a path}"; shift ;;
+        --native)     native_build=1 ;;
         --skip-build) skip_build=1 ;;
         --clean)      clean_only=1 ;;
         -h|--help)    usage; exit 0 ;;
@@ -49,7 +62,6 @@ log() { printf '[build_release] %s\n' "$*"; }
 
 # --- inputs ----------------------------------------------------------------
 
-binary="$root/build/sticky-notes"
 desktop="$root/scripts/sticky-notes.desktop"
 icon="$root/resources/icons/sticky-notes.png"
 installer="$root/scripts/install-release.sh"
@@ -66,13 +78,31 @@ esac
 
 # --- 1. Release binary -----------------------------------------------------
 
-if ((skip_build)); then
-    [[ -x "$binary" ]] || { echo "Binary not found: $binary (drop --skip-build)" >&2; exit 1; }
-    log "Reusing $binary"
+if [[ -n "$binary_override" ]]; then
+    binary="$binary_override"
+    [[ -x "$binary" ]] || { echo "Binary not found: $binary" >&2; exit 1; }
+    log "Using $binary"
+elif ((native_build)); then
+    # Host build: convenient for a quick local test, but the tarball inherits
+    # the host Qt and may not start on distributions with an older Qt.
+    binary="$root/build/sticky-notes"
+    if ((skip_build)); then
+        [[ -x "$binary" ]] || { echo "Binary not found: $binary (drop --skip-build)" >&2; exit 1; }
+        log "Reusing $binary"
+    else
+        log "Configuring and building (Release, host Qt)"
+        cmake -S "$root" -B "$root/build" -G Ninja -DCMAKE_BUILD_TYPE=Release
+        cmake --build "$root/build"
+    fi
 else
-    log "Configuring and building (Release)"
-    cmake -S "$root" -B "$root/build" -G Ninja -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$root/build"
+    # Portable build against Qt 6.10 + LayerShellQt 6.6 (see build_portable.sh).
+    binary="$root/build-release/sticky-notes"
+    if ((skip_build)); then
+        "$root/scripts/build_portable.sh" --skip-build
+    else
+        "$root/scripts/build_portable.sh"
+    fi
+    log "Using $binary"
 fi
 
 # Version is read from the binary; fall back to CMakeLists.txt because
@@ -124,14 +154,22 @@ on the target machine.
 - A **Wayland** session with layer-shell support: KWin since **Plasma 6.6**, or
   a wlroots compositor. GNOME (Mutter) and X11 sessions do **not** implement the
   protocol and cannot run the app.
-- Qt6 runtime libraries: Core, Gui, Widgets, Sql, Network.
-- **LayerShellQt** (\`libLayerShellQtInterface.so\`).
+- Qt6 runtime libraries: Core, Gui, Widgets, Sql, Network — **6.10 or newer**.
+- **LayerShellQt** (\`libLayerShellQtInterface.so\`) — **6.6 or newer**.
+
+The binary is built against Qt 6.10 and LayerShellQt 6.6, the oldest versions
+the app supports; newer ones work too. On a distribution with an older Qt
+(e.g. an older Ubuntu or Debian) use the self-contained **AppImage** instead,
+which bundles its own Qt.
 
 To check the missing libraries before launching:
 
 \`\`\`bash
 ldd ./sticky-notes | grep 'not found'
 \`\`\`
+
+A line like \`version 'Qt_6.12' not found\` means your Qt is older than the one
+this bundle was built against: install the AppImage instead.
 
 ## Run
 

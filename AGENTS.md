@@ -21,6 +21,22 @@ cmake --build build
 - Install for the current user: `./scripts/install.sh` (honors `PREFIX`, default
   `~/.local`). It expects an already-built `build/sticky-notes`.
 
+## Release builds
+
+- `scripts/build_release.sh` builds the tarball binary with
+  `scripts/build_portable.sh` inside `scripts/container/ubuntu26.04.Dockerfile`
+  (Qt 6.10, LayerShellQt 6.6) and writes `build-release/sticky-notes`. That
+  baseline is not cosmetic: the tarball does not bundle Qt, and Qt is forward
+  compatible only. A binary built on the rolling host (Qt 6.12) fails on
+  Fedora 44 (Qt 6.11.2) with `version 'Qt_6.12' not found`. `--native` exists
+  for local testing only; never publish a tarball built that way.
+- `scripts/build_appimage.sh` still builds `build/sticky-notes` on the host:
+  the AppImage bundles Qt and the loader, so the build Qt does not matter.
+- The tarball `install.sh` (`scripts/install-release.sh`) distinguishes a
+  missing library from a too-old one (`ldd` prints `version '…' not found`):
+  the latter cannot be fixed by installing packages, so it refuses to install
+  and points at the AppImage.
+
 ## Architecture
 
 Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry

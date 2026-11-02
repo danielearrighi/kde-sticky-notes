@@ -28,6 +28,8 @@ cd sticky-notes-<version>-x86_64
 
 The installer checks the runtime libraries, offers to install the missing ones with your package manager and copies the app into `~/.local`. Run it with `--help` for the options, and run `sticky-notes` (or the KDE menu entry) afterwards to start it.
 
+> **Qt version:** the tar.gz uses the system Qt and is built against **Qt 6.10 + LayerShellQt 6.6** (the oldest versions the app supports); it runs on any distribution with those or newer (Fedora 44, Tumbleweed, Ubuntu 26.04, ...). If your distribution has an older Qt, `install.sh` stops and points you to the AppImage, which bundles its own Qt.
+
 ## Build
 
 You need a **KDE Plasma (Wayland)** session with layer-shell support (KWin since

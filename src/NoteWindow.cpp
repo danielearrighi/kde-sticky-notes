@@ -2476,6 +2476,30 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     plainPaste->setEnabled(m_body->canPaste());
     connect(plainPaste, &QAction::triggered, this, &NoteWindow::pastePlainText);
 
+    // Web search for the selected text, opened in the default browser.
+    // selectedText() uses U+2029 between paragraphs: collapse every separator
+    // and line break to a space so the query is a single line. The label keeps
+    // the menu narrow with a truncated preview of the same string.
+    if (hasSelection) {
+        QString query = m_body->textCursor().selectedText();
+        query.replace(QChar::ParagraphSeparator, QLatin1Char(' '));
+        query.replace(QLatin1Char('\n'), QLatin1Char(' '));
+        query = query.simplified();
+        if (!query.isEmpty()) {
+            constexpr int kMaxPreview = 32;
+            QString preview = query;
+            if (preview.size() > kMaxPreview)
+                preview = preview.left(kMaxPreview - 1) + QStringLiteral("…");
+            QAction *search = menu.addAction(menuIcon(QStringLiteral("edit-find")),
+                                             I18n::t(QStringLiteral("note.search_google")).arg(preview));
+            const QUrl url(QStringLiteral("https://www.google.com/search?q=")
+                           + QString::fromLatin1(QUrl::toPercentEncoding(query)));
+            connect(search, &QAction::triggered, this, [url] {
+                QDesktopServices::openUrl(url);
+            });
+        }
+    }
+
     menu.addSeparator();
 
     // Appearance of the note.

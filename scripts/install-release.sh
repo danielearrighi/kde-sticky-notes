@@ -101,14 +101,25 @@ plugin_dirs+=(/usr/lib64/qt6/plugins /usr/lib/qt6/plugins
               /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib/aarch64-linux-gnu/qt6/plugins)
 
 missing_libs=()
+version_errors=()
 missing_plugin=0
 
 check_deps() {
     missing_libs=()
+    version_errors=()
     local line
-    while read -r line; do
-        [[ -n "$line" ]] && missing_libs+=("$line")
-    done < <(ldd "$binary" 2>/dev/null | awk '/not found/ {print $1}')
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        # A binary linked against a newer Qt than the one installed produces,
+        # e.g.: "./sticky-notes: /lib64/libQt6Core.so.6: version `Qt_6.12' not
+        # found (required by ./sticky-notes)". Reinstalling the package cannot
+        # fix that: the system's Qt is simply older than the build's.
+        if [[ "$line" == *"version "*"not found"* ]]; then
+            version_errors+=("$line")
+        elif [[ "$line" == *"not found"* ]]; then
+            missing_libs+=("$(awk '{print $1}' <<<"$line")")
+        fi
+    done < <(ldd "$binary" 2>&1)
 
     missing_plugin=0
     if [[ "${#missing_libs[@]}" -gt 0 || "${install_deps}" -eq 1 ]]; then
@@ -125,12 +136,21 @@ check_deps() {
 }
 
 print_missing() {
-    local lib
+    local lib line
     for lib in "${missing_libs[@]}"; do
         warn "missing library: $lib"
     done
+    for line in "${version_errors[@]}"; do
+        warn "library too old: ${line#"$binary: "}"
+    done
     ((missing_plugin)) && warn "missing Qt Wayland platform plugin: libqwayland.so"
     return 0
+}
+
+appimage_hint() {
+    warn "this bundle needs a newer Qt than this system provides, and no package"
+    warn "manager can fix that. Use the self-contained AppImage, which bundles Qt:"
+    warn "  https://github.com/danielearrighi/kde-sticky-notes/releases"
 }
 
 # Package manager family (from /etc/os-release) and the packages that provide
@@ -198,47 +218,61 @@ manual_hint() {
 if ((install_deps)); then
     log "Checking runtime dependencies"
     check_deps
-    if [[ "${#missing_libs[@]}" -eq 0 && "${missing_plugin}" -eq 0 ]]; then
+    if [[ "${#missing_libs[@]}" -eq 0 && "${#version_errors[@]}" -eq 0 && "${missing_plugin}" -eq 0 ]]; then
         log "All required libraries are present"
     else
         print_missing
-        if [[ "$family" == "unknown" || "${#pkgs[@]}" -eq 0 ]]; then
-            warn "unknown distribution: cannot detect the packages automatically"
-            manual_hint
-        else
-            # Keep only the packages the repo knows and that are not installed yet.
-            to_install=()
-            for p in "${pkgs[@]}"; do
-                if ! pkg_installed "$p" && pkg_available "$p"; then
-                    to_install+=("$p")
-                fi
-            done
-            if [[ "${#to_install[@]}" -eq 0 ]]; then
-                warn "no matching package found for the missing libraries"
+        if [[ "${#version_errors[@]}" -gt 0 ]]; then
+            appimage_hint
+        fi
+        if [[ "${#missing_libs[@]}" -gt 0 || "${missing_plugin}" -gt 0 ]]; then
+            if [[ "$family" == "unknown" || "${#pkgs[@]}" -eq 0 ]]; then
+                warn "unknown distribution: cannot detect the packages automatically"
                 manual_hint
-            elif confirm "Install the missing packages with ${family} (${to_install[*]})?"; then
-                log "Installing: ${to_install[*]}"
-                if install_packages "${to_install[@]}"; then
-                    check_deps
-                    if [[ "${#missing_libs[@]}" -eq 0 && "${missing_plugin}" -eq 0 ]]; then
-                        log "Dependencies installed"
+            else
+                # Keep only the packages the repo knows and that are not installed yet.
+                to_install=()
+                for p in "${pkgs[@]}"; do
+                    if ! pkg_installed "$p" && pkg_available "$p"; then
+                        to_install+=("$p")
+                    fi
+                done
+                if [[ "${#to_install[@]}" -eq 0 ]]; then
+                    warn "no matching package found for the missing libraries"
+                    manual_hint
+                elif confirm "Install the missing packages with ${family} (${to_install[*]})?"; then
+                    log "Installing: ${to_install[*]}"
+                    if install_packages "${to_install[@]}"; then
+                        check_deps
+                        if [[ "${#missing_libs[@]}" -eq 0 && "${#version_errors[@]}" -eq 0 && "${missing_plugin}" -eq 0 ]]; then
+                            log "Dependencies installed"
+                        else
+                            print_missing
+                            manual_hint
+                        fi
                     else
-                        print_missing
+                        warn "package installation failed"
                         manual_hint
                     fi
                 else
-                    warn "package installation failed"
+                    warn "skipping package installation"
                     manual_hint
                 fi
-            else
-                warn "skipping package installation"
-                manual_hint
+            fi
+            if [[ "${#missing_libs[@]}" -gt 0 || "${missing_plugin}" -gt 0 ]]; then
+                warn "the app may not start until the libraries above are installed"
             fi
         fi
-        if [[ "${#missing_libs[@]}" -gt 0 || "${missing_plugin}" -gt 0 ]]; then
-            warn "the app may not start until the libraries above are installed"
-        fi
     fi
+fi
+
+# A too-old Qt cannot be fixed by installing packages, so do not leave a binary
+# that cannot start in ~/.local/bin: point at the AppImage instead. --no-deps
+# still forces the installation (for users who know what they are doing).
+if ((install_deps)) && [[ "${#version_errors[@]}" -gt 0 ]]; then
+    warn "not installing: this system's libraries are older than this binary needs"
+    warn "run ./install.sh --no-deps to install it anyway"
+    exit 1
 fi
 
 # --- 3. Install the app ----------------------------------------------------

@@ -55,6 +55,7 @@
   "note.delete_to_trash": "Delete (to trash)",
   "note.settings": "Settings…",
   "note.confirm_delete": "Move “%1” to the trash?",
+  "note.search_google": "Search “%1” on Google",
   "format.style": "Style",
   "format.paragraph": "Paragraph",
   "format.bold": "Bold",

@@ -55,6 +55,7 @@
   "note.delete_to_trash": "Elimina (nel cestino)",
   "note.settings": "Impostazioni…",
   "note.confirm_delete": "Spostare “%1” nel cestino?",
+  "note.search_google": "Cerca “%1” su Google",
   "format.style": "Stile",
   "format.paragraph": "Paragrafo",
   "format.bold": "Grassetto",

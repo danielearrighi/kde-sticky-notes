@@ -55,6 +55,7 @@
   "note.delete_to_trash": "Eliminar (a la papelera)",
   "note.settings": "Ajustes…",
   "note.confirm_delete": "¿Mover «%1» a la papelera?",
+  "note.search_google": "Buscar «%1» en Google",
   "format.style": "Estilo",
   "format.paragraph": "Párrafo",
   "format.bold": "Negrita",
