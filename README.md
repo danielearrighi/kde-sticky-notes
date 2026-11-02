@@ -116,7 +116,7 @@ start, so a broken update can be recovered by hand.
   running in the system tray when the hub is closed, and pick the tray icon
   (automatic, colored or a custom image).
 - **Single instance** — launching the app again just brings the hub to the front.
-- **Languages** — English, Italian and Spanish
+- **Languages** — English, Italian, Spanish and French
 
 ![Sticky Notes: Settings window](screens/settings.png)
 
