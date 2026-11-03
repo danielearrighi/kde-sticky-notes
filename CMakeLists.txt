@@ -25,6 +25,7 @@ qt_add_executable(sticky-notes
     src/Storage.h         src/Storage.cpp
     src/Themes.h          src/Themes.cpp
     src/I18n.h            src/I18n.cpp
+    src/Platform.h
     src/NoteWindow.h      src/NoteWindow.cpp
     src/UiHelpers.h       src/UiHelpers.cpp
     src/Updater.h         src/Updater.cpp

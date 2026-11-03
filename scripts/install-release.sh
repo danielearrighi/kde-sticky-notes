@@ -149,7 +149,8 @@ print_missing() {
 
 appimage_hint() {
     warn "this bundle needs a newer Qt than this system provides, and no package"
-    warn "manager can fix that. Use the self-contained AppImage, which bundles Qt:"
+    warn "manager can fix that. Use the self-contained AppImage or the Flatpak,"
+    warn "which bundle Qt:"
     warn "  https://github.com/danielearrighi/kde-sticky-notes/releases"
 }
 

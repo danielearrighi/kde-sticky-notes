@@ -8,6 +8,7 @@
 
 #include "AppController.h"
 #include "I18n.h"
+#include "Platform.h"
 #include "Storage.h"
 #include "Version.h"
 
@@ -21,7 +22,11 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("StickyNotes"));
     QApplication::setApplicationVersion(QStringLiteral(STICKY_NOTES_VERSION));
     QApplication::setApplicationDisplayName(QStringLiteral("Sticky Notes"));
-    QApplication::setDesktopFileName(QStringLiteral("sticky-notes"));
+    // The Flatpak installs its .desktop entry under the application id, which
+    // is also the id the compositor must match against the window.
+    QApplication::setDesktopFileName(Platform::isFlatpak()
+                                         ? Platform::flatpakAppId()
+                                         : QStringLiteral("sticky-notes"));
     QApplication::setQuitOnLastWindowClosed(false);
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/sticky-notes.png")));
 

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata installed by the Flatpak. Keep the <releases> entry in
+  sync with project(... VERSION) in CMakeLists.txt when preparing a release.
+-->
+<component type="desktop-application">
+  <id>io.github.danielearrighi.StickyNotes</id>
+  <name>Sticky Notes</name>
+  <summary>Desktop sticky notes for KDE Plasma</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      Sticky Notes puts colored notes directly on the KDE Plasma desktop as
+      Wayland layer-shell surfaces: they stay under (or above) normal windows,
+      out of the taskbar and of Alt+Tab.
+    </p>
+    <p>Each note supports:</p>
+    <ul>
+      <li>Markdown formatting from the context menu</li>
+      <li>per-note theme, opacity, always-on-top/desktop layer and size</li>
+      <li>drag from the title bar and resize from the bottom-right corner</li>
+    </ul>
+    <p>
+      A hub window manages the notes (grid, trash, settings, backup and
+      restore), can keep the app in the system tray and can start the notes at
+      login.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.danielearrighi.StickyNotes.desktop</launchable>
+  <url type="homepage">https://github.com/danielearrighi/kde-sticky-notes</url>
+  <url type="bugtracker">https://github.com/danielearrighi/kde-sticky-notes/issues</url>
+  <developer id="io.github.danielearrighi">
+    <name>Daniele Arrighi</name>
+  </developer>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/danielearrighi/kde-sticky-notes/main/screens/splash.png</image>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/danielearrighi/kde-sticky-notes/main/screens/notes.png</image>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/danielearrighi/kde-sticky-notes/main/screens/settings.png</image>
+    </screenshot>
+  </screenshots>
+
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>note</keyword>
+    <keyword>sticky</keyword>
+    <keyword>postit</keyword>
+    <keyword>memo</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.3.4" date="2026-11-03">
+      <description>
+        <p>Flatpak packaging.</p>
+      </description>
+    </release>
+  </releases>
+</component>

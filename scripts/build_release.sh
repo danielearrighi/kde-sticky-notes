@@ -159,8 +159,8 @@ on the target machine.
 
 The binary is built against Qt 6.10 and LayerShellQt 6.6, the oldest versions
 the app supports; newer ones work too. On a distribution with an older Qt
-(e.g. an older Ubuntu or Debian) use the self-contained **AppImage** instead,
-which bundles its own Qt.
+(e.g. an older Ubuntu or Debian) use the self-contained **AppImage** or the
+**Flatpak**, which bundle their own Qt.
 
 To check the missing libraries before launching:
 
@@ -169,7 +169,7 @@ ldd ./sticky-notes | grep 'not found'
 \`\`\`
 
 A line like \`version 'Qt_6.12' not found\` means your Qt is older than the one
-this bundle was built against: install the AppImage instead.
+this bundle was built against: install the AppImage or the Flatpak instead.
 
 ## Run
 
@@ -233,7 +233,7 @@ file to start from scratch.
   front.
 - To uninstall a previous copy before installing this version, see above.
 - This is the plain binary release; the self-contained **AppImage** (bundles Qt6
-  and LayerShellQt) is published separately.
+  and LayerShellQt) and the **Flatpak** are published separately.
 
 ## License
 

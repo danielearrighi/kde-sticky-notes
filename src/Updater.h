@@ -20,8 +20,9 @@ class QTimer;
 ///  - a user install from the release tarball: `<prefix>/bin/sticky-notes` next
 ///    to `<prefix>/share/applications/sticky-notes.desktop` (the tarball's
 ///    install.sh layout).
-/// A development build (`build/sticky-notes`) and a distro package are reported
-/// as Unsupported: the UI then only links to the release page.
+/// A development build (`build/sticky-notes`), a distro package and the
+/// Flatpak (read-only `/app`, updated through the Flatpak installation) are
+/// reported as Unsupported: the UI then only links to the release page.
 ///
 /// The update is verified against the `SHA256SUMS` asset of the release (falling
 /// back to the `digest` field of the GitHub API) and written atomically: the new

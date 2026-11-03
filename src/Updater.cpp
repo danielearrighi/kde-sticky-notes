@@ -1,5 +1,7 @@
 #include "Updater.h"
 
+#include "Platform.h"
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -94,32 +96,42 @@ QString sha256FromSums(const QByteArray &sums, const QString &fileName)
 Updater::Updater(QObject *parent)
     : QObject(parent)
 {
-    // The AppImage runtime exports the real file: applicationFilePath() points
-    // inside the temporary mount and would disappear when the app exits.
-    const QString appImage =
-        QFileInfo(QFile::decodeName(qgetenv("APPIMAGE"))).canonicalFilePath();
-    if (!appImage.isEmpty()) {
-        m_kind = InstallKind::AppImage;
-        m_target = appImage;
+    // The Flatpak keeps the app in the read-only /app prefix and is updated by
+    // the Flatpak installation (software store or `flatpak update`), so there
+    // is no file this process may replace. The check itself still works; the
+    // Info tab explains where the update has to come from.
+    if (Platform::isFlatpak()) {
+        m_kind = InstallKind::Unsupported;
     } else {
-        // A user install from the release tarball: <prefix>/bin/sticky-notes
-        // next to <prefix>/share/applications/sticky-notes.desktop. System
-        // packages (in /usr/bin) are not writable, so they end up Unsupported.
-        const QFileInfo exe(QCoreApplication::applicationFilePath());
-        const QDir binDir(exe.canonicalPath());
-        // Inside a mounted AppImage without $APPIMAGE (never expected): the
-        // temporary mount must not be mistaken for a user install.
-        if (binDir.absolutePath().contains(QStringLiteral("/.mount_"))) {
-            m_kind = InstallKind::Unsupported;
-        } else if (binDir.dirName() == QLatin1String("bin")) {
-            const QString prefix = QFileInfo(binDir.absolutePath()).absolutePath();
-            const QString desktop =
-                QDir(prefix).filePath(QStringLiteral("share/applications/sticky-notes.desktop"));
-            const QFileInfo canonical(exe.canonicalFilePath());
-            if (QFileInfo::exists(desktop) && canonical.isWritable()
-                && QFileInfo(canonical.absolutePath()).isWritable()) {
-                m_kind = InstallKind::UserInstall;
-                m_target = canonical.absoluteFilePath();
+        // The AppImage runtime exports the real file: applicationFilePath()
+        // points inside the temporary mount and would disappear when the app
+        // exits.
+        const QString appImage =
+            QFileInfo(QFile::decodeName(qgetenv("APPIMAGE"))).canonicalFilePath();
+        if (!appImage.isEmpty()) {
+            m_kind = InstallKind::AppImage;
+            m_target = appImage;
+        } else {
+            // A user install from the release tarball: <prefix>/bin/sticky-notes
+            // next to <prefix>/share/applications/sticky-notes.desktop. System
+            // packages (in /usr/bin) are not writable, so they end up
+            // Unsupported.
+            const QFileInfo exe(QCoreApplication::applicationFilePath());
+            const QDir binDir(exe.canonicalPath());
+            // Inside a mounted AppImage without $APPIMAGE (never expected): the
+            // temporary mount must not be mistaken for a user install.
+            if (binDir.absolutePath().contains(QStringLiteral("/.mount_"))) {
+                m_kind = InstallKind::Unsupported;
+            } else if (binDir.dirName() == QLatin1String("bin")) {
+                const QString prefix = QFileInfo(binDir.absolutePath()).absolutePath();
+                const QString desktop = QDir(prefix).filePath(
+                    QStringLiteral("share/applications/sticky-notes.desktop"));
+                const QFileInfo canonical(exe.canonicalFilePath());
+                if (QFileInfo::exists(desktop) && canonical.isWritable()
+                    && QFileInfo(canonical.absolutePath()).isWritable()) {
+                    m_kind = InstallKind::UserInstall;
+                    m_target = canonical.absoluteFilePath();
+                }
             }
         }
     }

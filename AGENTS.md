@@ -30,6 +30,17 @@ cmake --build build
   compatible only. A binary built on the rolling host (Qt 6.12) fails on
   Fedora 44 (Qt 6.11.2) with `version 'Qt_6.12' not found`. `--native` exists
   for local testing only; never publish a tarball built that way.
+- `scripts/build_flatpak.sh` builds
+  `release/sticky-notes-<version>-<arch>.flatpak` from
+  `packaging/io.github.danielearrighi.StickyNotes.yml` against
+  `org.kde.Platform`/`org.kde.Sdk` **6.10** (Qt 6.10.3), and compiles
+  **LayerShellQt 6.6 from source** because `org.kde.Platform` does not ship it.
+  The runtime is a Flatpak dependency (downloaded on install), so the host Qt
+  is irrelevant: the same bundle runs on Fedora 44, Ubuntu, Debian, etc. The
+  build needs `org.kde.Sdk//6.10`; if `flatpak-builder` is not installed the
+  script falls back to `flatpak run --command=flatpak-builder org.flatpak.Builder`
+  (with `FLATPAK_USER_DIR` pointed at the real user installation, otherwise the
+  host flatpak looks for the SDK in the Builder's own `~/.var/app` data).
 - `scripts/build_appimage.sh` still builds `build/sticky-notes` on the host:
   the AppImage bundles Qt and the loader, so the build Qt does not matter.
 - The tarball `install.sh` (`scripts/install-release.sh`) distinguishes a
@@ -82,6 +93,20 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   `--autostart` launch) and routes the prompt to `InfoTab`, which also owns the
   manual button and the download progress. `STICKY_NOTES_UPDATE_FEED` overrides
   the API URL for local testing.
+- The Flatpak (`packaging/io.github.danielearrighi.StickyNotes.yml`,
+  `src/Platform.h`) is detected through `/.flatpak-info`. `/app` is read-only,
+  so `Updater` reports `Unsupported` and `AppController` skips the daily check;
+  a manual check still runs and `InfoTab` points at `flatpak update`. Flatpak
+  sets `XDG_DATA_HOME` inside the sandbox, so the DB is
+  `~/.var/app/<id>/data/StickyNotes/notes.db`; the autostart entry must instead
+  be written to the real host `~/.config/autostart` (the manifest grants
+  `--filesystem=xdg-config/autostart:create`) with
+  `Exec=flatpak run <id> --autostart`. The manifest `post-install` renames the
+  desktop file and icon to the app id, and `main.cpp` sets that id as the
+  desktop file name. `QFileDialog` stays native: unlike the AppImage, the KDE
+  runtime ships the KIO workers. The manifest must keep `--share=network`
+  (Flatpak does not grant it by default, and the update check then fails with a
+  DNS error) and installs the icon in the standard hicolor sizes (16-256).
 - Closing the hub (X or *Quit app*) quits the app by default: `HubWindow::closeEvent()`
   emits `quitRequested`, and `AppController::onQuitRequested()` decides what that
   means. With the **Close to system tray** setting the hub is only hidden instead
@@ -157,8 +182,11 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   against `SHA256SUMS`, the old one is renamed to `<target>.old` and removed on
   the next start. Development builds and `/usr/bin` packages are reported as
   unsupported (not writable): never attempt a self-update there.
-- `scripts/create_release.sh` must upload `SHA256SUMS` with every release: the
-  updater refuses to install an asset whose hash cannot be verified.
+- `scripts/create_release.sh` must upload `SHA256SUMS` and the `.flatpak` with
+  every release: the updater refuses to install an asset whose hash cannot be
+  verified, and the Flatpak asset is one of the three supported installations.
+- The Flatpak `metainfo.xml` under `packaging/` carries its own `<releases>`
+  entry: bump it together with `project(... VERSION)` in `CMakeLists.txt`.
 - **The AppImage bundles the C library** (`scripts/build_appimage.sh`): it is
   built on a rolling release (Tumbleweed, glibc 2.44) while AppImageHub tests on
   the oldest Ubuntu LTS still in standard support (glibc 2.35). `AppRun` is a

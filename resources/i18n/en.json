@@ -159,6 +159,7 @@
   "info.update_extract_failed": "Could not extract the downloaded archive:\n%1",
   "info.update_no_asset": "This release has no package for this installation. Download it manually from the release page.",
   "info.update_unsupported": "This copy cannot update itself (development build or system package). Download the new version from the release page.",
+  "info.update_flatpak": "This copy is managed by Flatpak: update it from your software store, with \"flatpak update\", or by installing the newer .flatpak bundle.",
   "info.unknown_error": "unknown error",
   "colors.yellow": "Yellow",
   "colors.pink": "Pink",

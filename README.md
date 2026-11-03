@@ -6,7 +6,25 @@ Desktop sticky notes for **KDE Plasma (Wayland)**.
 ## Try it!
 
 Download the latest release from the [Releases page](https://github.com/danielearrighi/kde-sticky-notes/releases).
-There are two ways to try it.
+There are three ways to try it.
+
+**Flatpak** (bundles Qt 6.10 and LayerShellQt in the `org.kde.Platform`
+runtime, so it does not depend on the distribution or on the Qt version
+installed): download `sticky-notes-<version>-x86_64.flatpak` and install it:
+
+```bash
+flatpak install --user ./sticky-notes-<version>-x86_64.flatpak
+flatpak run io.github.danielearrighi.StickyNotes
+```
+
+Flatpak downloads the KDE runtime automatically on install. If the app is
+installed from a repository (for example Flathub) update it with
+`flatpak update io.github.danielearrighi.StickyNotes`; for a downloaded
+`.flatpak` use the newer file:
+
+```bash
+flatpak install --user --reinstall ./sticky-notes-<new-version>-x86_64.flatpak
+```
 
 **AppImage** (self-contained, bundles Qt6 and LayerShellQt — nothing to build):
 download `sticky-notes-<version>-x86_64.AppImage`, make it executable and run it:
@@ -28,7 +46,7 @@ cd sticky-notes-<version>-x86_64
 
 The installer checks the runtime libraries, offers to install the missing ones with your package manager and copies the app into `~/.local`. Run it with `--help` for the options, and run `sticky-notes` (or the KDE menu entry) afterwards to start it.
 
-> **Qt version:** the tar.gz uses the system Qt and is built against **Qt 6.10 + LayerShellQt 6.6** (the oldest versions the app supports); it runs on any distribution with those or newer (Fedora 44, Tumbleweed, Ubuntu 26.04, ...). If your distribution has an older Qt, `install.sh` stops and points you to the AppImage, which bundles its own Qt.
+> **Qt version:** the tar.gz uses the system Qt and is built against **Qt 6.10 + LayerShellQt 6.6** (the oldest versions the app supports); it runs on any distribution with those or newer (Fedora 44, Tumbleweed, Ubuntu 26.04, ...). If your distribution has an older Qt, `install.sh` stops and points you to the AppImage or the Flatpak, which bundle their own Qt.
 
 ## Build
 
@@ -53,6 +71,24 @@ QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 ./build/sticky-notes
 > **Not on KDE?** GNOME (Mutter) and X11 sessions do not implement the
 > layer-shell protocol, so the app cannot run there. It is intentionally designed
 > for KDE Plasma.
+
+### Flatpak bundle
+
+The manifest is `packaging/io.github.danielearrighi.StickyNotes.yml`. It builds
+against `org.kde.Platform` / `org.kde.Sdk` **6.10** (Qt 6.10.3) and compiles
+**LayerShellQt 6.6** because the KDE runtime does not ship it. The runtime is a
+dependency of the app, not of the host, so the same bundle runs on Fedora 44,
+Ubuntu, Debian and so on regardless of their Qt version:
+
+```bash
+flatpak install flathub org.kde.Sdk//6.10
+./scripts/build_flatpak.sh            # release/sticky-notes-<version>-<arch>.flatpak
+./scripts/build_flatpak.sh --install  # build and install it
+```
+
+`flatpak-builder` is needed; if it is missing, the script uses the
+`org.flatpak.Builder` Flatpak app (`flatpak install flathub org.flatpak.Builder`).
+
 
 ## Install
 
@@ -86,6 +122,11 @@ button at any time. Nothing is downloaded without asking: the prompt offers
 - **tar.gz install** — if you installed with the bundled `install.sh` into
   `~/.local`, the new tarball is extracted and `~/.local/bin/sticky-notes` is
   replaced. The `.desktop` entry and the icon are unchanged.
+- **Flatpak** — managed by Flatpak: update with
+  `flatpak update io.github.danielearrighi.StickyNotes` when it comes from a
+  repository, or reinstall the newer `.flatpak` bundle. Inside the sandbox
+  `/app` is read-only, so the automatic daily check is skipped and the
+  *Check for updates* button only reports the new version.
 - **Development builds** (`build/sticky-notes`) and **system packages**
   (`/usr/bin`, managed by the distribution) cannot update themselves: the
   dialog only links to the release page.
@@ -124,12 +165,19 @@ start, so a broken update can be recovered by hand.
 
 ## Data
 
-Path: `~/.local/share/StickyNotes/notes.db` (SQLite).
+Path (tarball/AppImage install): `~/.local/share/StickyNotes/notes.db` (SQLite).
+The Flatpak stores its notes in the sandbox:
+`~/.var/app/io.github.danielearrighi.StickyNotes/data/StickyNotes/notes.db`.
+A Flatpak install does not see the database of a tarball/AppImage install: to
+move notes, create a backup from the old installation and restore it from the
+Flatpak's *Settings* tab.
 
 To start from scratch:
 
 ```bash
 rm ~/.local/share/StickyNotes/notes.db
+# Flatpak:
+rm ~/.var/app/io.github.danielearrighi.StickyNotes/data/StickyNotes/notes.db
 ```
 
 ---

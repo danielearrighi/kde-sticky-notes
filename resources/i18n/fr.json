@@ -159,6 +159,7 @@
   "info.update_extract_failed": "Impossible d'extraire l'archive téléchargée :\n%1",
   "info.update_no_asset": "Cette version n'a pas de paquet pour cette installation. Téléchargez-la manuellement depuis la page de la version.",
   "info.update_unsupported": "Cette copie ne peut pas se mettre à jour (version de développement ou paquet système). Téléchargez la nouvelle version depuis la page de la version.",
+  "info.update_flatpak": "Cette copie est gérée par Flatpak : mettez-la à jour depuis votre logithèque, avec \"flatpak update\" ou en installant le nouveau paquet .flatpak.",
   "info.unknown_error": "erreur inconnue",
   "colors.yellow": "Jaune",
   "colors.pink": "Rose",

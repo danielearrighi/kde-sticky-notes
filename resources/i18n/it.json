@@ -159,6 +159,7 @@
   "info.update_extract_failed": "Impossibile estrarre l'archivio scaricato:\n%1",
   "info.update_no_asset": "Questa release non contiene un pacchetto adatto a questa installazione. Scaricala manualmente dalla pagina release.",
   "info.update_unsupported": "Questa copia non può aggiornarsi da sola (build di sviluppo o pacchetto di sistema). Scarica la nuova versione dalla pagina release.",
+  "info.update_flatpak": "Questa copia è gestita da Flatpak: aggiornala dal centro software, con \"flatpak update\" oppure installando il nuovo bundle .flatpak.",
   "info.unknown_error": "errore sconosciuto",
   "colors.yellow": "Giallo",
   "colors.pink": "Rosa",

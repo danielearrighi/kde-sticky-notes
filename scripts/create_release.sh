@@ -5,14 +5,15 @@
 #   1. bump project(... VERSION) in CMakeLists.txt, commit (and push)
 #   2. scripts/build_release.sh
 #   3. scripts/build_appimage.sh
-#   4. scripts/create_release.sh
+#   4. scripts/build_flatpak.sh
+#   5. scripts/create_release.sh
 #
 # The script reads the version from CMakeLists.txt, expects
-# release/sticky-notes-<version>-<arch>.AppImage and .tar.gz, asks for the
-# release notes (multi-line Markdown in $EDITOR), creates the tag on the remote
-# at HEAD and uploads the two files plus SHA256SUMS (which the app checks before
-# installing an update). It never commits or pushes code on its own:
-# if HEAD is not pushed yet it asks first.
+# release/sticky-notes-<version>-<arch>.AppImage, .tar.gz and .flatpak, asks for
+# the release notes (multi-line Markdown in $EDITOR), creates the tag on the
+# remote at HEAD and uploads the three files plus SHA256SUMS (which the app
+# checks before installing an update). It never commits or pushes code on its
+# own: if HEAD is not pushed yet it asks first.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
@@ -27,7 +28,7 @@ usage() {
 Usage: scripts/create_release.sh [options]
 
 Creates the GitHub release for the version in CMakeLists.txt, uploading
-release/sticky-notes-<version>-<arch>.AppImage, .tar.gz and SHA256SUMS.
+release/sticky-notes-<version>-<arch>.AppImage, .tar.gz, .flatpak and SHA256SUMS.
 
 Options:
   -y, --yes              do not ask for confirmation
@@ -83,9 +84,11 @@ esac
 
 appimage="$root/release/sticky-notes-$version-$arch.AppImage"
 tarball="$root/release/sticky-notes-$version-$arch.tar.gz"
-for f in "$appimage" "$tarball"; do
+flatpak_bundle="$root/release/sticky-notes-$version-$arch.flatpak"
+for f in "$appimage" "$tarball" "$flatpak_bundle"; do
     [[ -f "$f" ]] || die "Missing $f
-Run scripts/build_release.sh and scripts/build_appimage.sh first."
+Run scripts/build_release.sh, scripts/build_appimage.sh and
+scripts/build_flatpak.sh first."
 done
 
 # --- repository state -------------------------------------------------------
@@ -159,16 +162,18 @@ if ((dry_run)); then
     log "Would write $sums"
 else
     ( cd "$root/release" \
-        && sha256sum "$(basename "$appimage")" "$(basename "$tarball")" > "$sums" ) \
+        && sha256sum "$(basename "$appimage")" "$(basename "$tarball")" \
+                      "$(basename "$flatpak_bundle")" > "$sums" ) \
         || die "Could not write $sums"
 fi
 
 printf '\n----- release notes for %s -----\n' "$tag"
 cat "$notes_tmp"
 printf -- '--------------------------------\n\n'
-printf 'Assets:\n  %s (%s)\n  %s (%s)\n\n' \
+printf 'Assets:\n  %s (%s)\n  %s (%s)\n  %s (%s)\n\n' \
     "$(basename "$appimage")" "$(du -h "$appimage" | cut -f1)" \
-    "$(basename "$tarball")" "$(du -h "$tarball" | cut -f1)"
+    "$(basename "$tarball")" "$(du -h "$tarball" | cut -f1)" \
+    "$(basename "$flatpak_bundle")" "$(du -h "$flatpak_bundle" | cut -f1)"
 
 confirm "Create release $tag and upload these files?" || die "Aborted"
 
@@ -179,7 +184,7 @@ run gh release create "$tag" \
     --title "$tag" \
     --notes-file "$notes_tmp" \
     --target "$(git rev-parse HEAD)" \
-    "$appimage" "$tarball" "$sums"
+    "$appimage" "$tarball" "$flatpak_bundle" "$sums"
 
 if ((dry_run)); then
     log "Dry run: nothing was created"

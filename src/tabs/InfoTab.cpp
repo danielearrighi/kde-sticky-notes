@@ -1,6 +1,7 @@
 #include "InfoTab.h"
 
 #include "I18n.h"
+#include "Platform.h"
 #include "Storage.h"
 
 #include <QCoreApplication>
@@ -193,7 +194,9 @@ void InfoTab::promptForUpdate(const Updater::CheckResult &result)
     if (canInstall)
         install = box.addButton(I18n::t(QStringLiteral("info.install_now")), QMessageBox::AcceptRole);
     else if (!selfUpdate)
-        box.setInformativeText(I18n::t(QStringLiteral("info.update_unsupported")));
+        box.setInformativeText(
+            I18n::t(Platform::isFlatpak() ? QStringLiteral("info.update_flatpak")
+                                          : QStringLiteral("info.update_unsupported")));
     else
         box.setInformativeText(I18n::t(QStringLiteral("info.update_no_asset")));
 

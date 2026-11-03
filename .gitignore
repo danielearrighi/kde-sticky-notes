@@ -15,3 +15,6 @@ build-release/
 
 # build_release.sh artifacts
 release/
+
+# build_flatpak.sh artifacts
+build-flatpak/

@@ -2,6 +2,7 @@
 #include "I18n.h"
 #include "NoteWindow.h"
 #include "HubWindow.h"
+#include "Platform.h"
 #include "Storage.h"
 #include "Themes.h"
 #include "UiHelpers.h"
@@ -562,8 +563,17 @@ bool AppController::eventFilter(QObject *watched, QEvent *event)
 
 void AppController::applyAutostart()
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-                        + QStringLiteral("/autostart");
+    // Inside the Flatpak the sandbox redirects XDG_CONFIG_HOME to
+    // ~/.var/app/<id>/config, a directory the host session never reads. The
+    // manifest grants --filesystem=xdg-config/autostart:create, which binds the
+    // real ~/.config/autostart at that path: write there, and restart the app
+    // through "flatpak run" because /app/bin is read-only and only exists
+    // inside the sandbox.
+    const bool flatpak = Platform::isFlatpak();
+    const QString dir = flatpak
+                            ? QDir::homePath() + QStringLiteral("/.config/autostart")
+                            : QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+                                  + QStringLiteral("/autostart");
     QDir().mkpath(dir);
     const QString file = dir + QStringLiteral("/sticky-notes.desktop");
 
@@ -573,6 +583,10 @@ void AppController::applyAutostart()
         return;
     }
 
+    const QString exec = flatpak
+                             ? QStringLiteral("flatpak run %1").arg(Platform::flatpakAppId())
+                             : QStringLiteral("\"%1\"").arg(QCoreApplication::applicationFilePath());
+
     QFile f(file);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
         return;
@@ -581,8 +595,9 @@ void AppController::applyAutostart()
         << "Type=Application\n"
         << "Name=Sticky Notes\n"
         << "Comment=" << I18n::t(QStringLiteral("app.autostart_comment")) << "\n"
-        << "Exec=\"" << QCoreApplication::applicationFilePath() << "\" --autostart\n"
-        << "Icon=sticky-notes\n"
+        << "Exec=" << exec << " --autostart\n"
+        << "Icon=" << (flatpak ? Platform::flatpakAppId() : QStringLiteral("sticky-notes"))
+        << "\n"
         << "Terminal=false\n"
         << "X-GNOME-Autostart-enabled=true\n"
         << "OnlyShowIn=KDE;\n";

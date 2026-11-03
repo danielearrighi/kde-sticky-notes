@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Flatpak manifest for Sticky Notes.
+#
+# Build a bundle with scripts/build_flatpak.sh (--install installs it too). The
+# script needs:
+#
+#   flatpak install flathub org.kde.Sdk//6.10
+#
+# org.kde.Platform 6.10 carries Qt 6.10.3 and is the baseline the app needs
+# (LayerShellQt 6.6 wants Qt >= 6.10). The runtime is downloaded by the user's
+# Flatpak installation, so the host distribution may have an older Qt (Debian,
+# Ubuntu, ...) without affecting the app. LayerShellQt is not part of
+# org.kde.Platform, so it is built here from the same 6.6 series as the tarball
+# baseline.
+id: io.github.danielearrighi.StickyNotes
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+command: sticky-notes
+branch: stable
+
+finish-args:
+  # The app is a layer-shell client: Wayland only, no X11 fallback.
+  - --socket=wayland
+  - --share=ipc
+  - --device=dri
+  # Flatpak does not share the network by default; the Info tab checks the
+  # GitHub release feed over HTTPS.
+  - --share=network
+  # Backup & restore saves wherever the user picks in the file dialog.
+  - --filesystem=home
+  # AppController::applyAutostart() writes the real host autostart entry; the
+  # sandbox XDG_CONFIG_HOME (~/.var/app/<id>/config) is never read at login.
+  - --filesystem=xdg-config/autostart:create
+  # QSystemTrayIcon on Plasma registers through the StatusNotifierWatcher.
+  - --talk-name=org.kde.StatusNotifierWatcher
+
+cleanup:
+  - /include
+  - /lib/cmake
+  - /lib/pkgconfig
+  - /share/ECM
+
+modules:
+  # Not shipped in org.kde.Platform. LayerShellQt 6.6 is the oldest series that
+  # provides setDesiredSize() and setActivateOnShow(); it requires Qt 6.10 and
+  # ECM 6.22+, both present in org.kde.Sdk//6.10.
+  - name: layer-shell-qt
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: archive
+        url: https://download.kde.org/stable/plasma/6.6.4/layer-shell-qt-6.6.4.tar.xz
+        sha256: 731af7a222bc1a1e87fd993060ed8fa515b4b38cbc294063b700ec87451e013f
+
+  - name: sticky-notes
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - .git
+          - .vscode
+          - build
+          - build-release
+          - build-flatpak
+          - release
+          - docs
+          - screens
+          - scripts/tools
+          - scripts/AppDir
+    # Flathub requires the desktop file and the icon to be named after the
+    # application id. CMake installs them with the plain "sticky-notes" names
+    # used by the tarball/AppImage, so rename them here.
+    post-install:
+      - rm -f /app/share/applications/sticky-notes.desktop
+      - install -Dm644 scripts/sticky-notes.desktop
+        /app/share/applications/io.github.danielearrighi.StickyNotes.desktop
+      - sed -i 's|^Icon=sticky-notes$|Icon=io.github.danielearrighi.StickyNotes|'
+        /app/share/applications/io.github.danielearrighi.StickyNotes.desktop
+      - install -Dm644 resources/icons/sticky-notes.png
+        /app/share/icons/hicolor/256x256/apps/io.github.danielearrighi.StickyNotes.png
+      - install -Dm644 packaging/io.github.danielearrighi.StickyNotes.metainfo.xml
+        /app/share/metainfo/io.github.danielearrighi.StickyNotes.metainfo.xml
+      # Install the standard hicolor sizes instead of only 256x256: menus and
+      # panels then pick the exact size instead of scaling the largest icon
+      # down themselves.
+      - for size in 16 22 32 48 64 128 256; do
+        install -Dm644 "packaging/icons/sticky-notes-${size}.png"
+        "/app/share/icons/hicolor/${size}x${size}/apps/io.github.danielearrighi.StickyNotes.png";
+        done
