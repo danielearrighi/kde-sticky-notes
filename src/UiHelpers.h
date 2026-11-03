@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QFileDialog>
 #include <QIcon>
 #include <QString>
 
@@ -35,6 +36,14 @@ inline QString trayIconCustom() { return QStringLiteral("custom"); }
 /// loads \a path and falls back to "auto" when the file is missing or
 /// unreadable.
 QIcon trayIcon(const QString &mode, const QString &path);
+
+/// Options to pass to every QFileDialog call. In the AppImage the native KDE
+/// dialog is disabled: the bundled KDEPlasmaPlatformTheme6 implements it with
+/// KFileWidget, which lists folders through KIO, and linuxdeploy does not
+/// deploy the KIO workers (plugins/kf6/kio). The dialog would open, show the
+/// sidebar, and list no file at all. The Qt dialog lists the filesystem
+/// directly and also keeps the Plasma palette from the same platform theme.
+QFileDialog::Options fileDialogOptions();
 
 /// Default date/time format, centralized as a setting for a future i18n.
 QString defaultDateFormat();

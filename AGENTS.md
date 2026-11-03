@@ -36,6 +36,14 @@ cmake --build build
   missing library from a too-old one (`ldd` prints `version '…' not found`):
   the latter cannot be fixed by installing packages, so it refuses to install
   and points at the AppImage.
+- The AppImage ships `KDEPlasmaPlatformTheme6.so` but not the KIO workers
+  (`plugins/kf6/kio`, e.g. `kio_file.so`), which linuxdeploy does not deploy.
+  That theme builds the native KDE file dialog on `KFileWidget`/KIO, so inside
+  the AppImage the dialog would open, show the sidebar and list **no file at
+  all**. Every `QFileDialog` call therefore passes
+  `UiHelpers::fileDialogOptions()`, which selects `DontUseNativeDialog` when
+  the AppImage runtime exported `APPIMAGE`/`APPDIR`; the Qt dialog lists the
+  filesystem directly and still takes the Plasma palette from the theme.
 
 ## Architecture
 

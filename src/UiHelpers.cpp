@@ -116,6 +116,18 @@ QIcon trayIcon(const QString &mode, const QString &path)
     return QIcon(pm);
 }
 
+QFileDialog::Options fileDialogOptions()
+{
+    // The type-2 AppImage runtime exports APPIMAGE (path of the bundle) and
+    // APPDIR (mount point) for the process it starts, so both are set at any
+    // launch of the AppImage, including the ones after a self-update restart.
+    // See the comment in UiHelpers.h for why the native dialog cannot work
+    // there; scripts/build_appimage.sh ships no plugins/kf6/kio.
+    if (qEnvironmentVariableIsSet("APPIMAGE") || qEnvironmentVariableIsSet("APPDIR"))
+        return QFileDialog::DontUseNativeDialog;
+    return QFileDialog::Options();
+}
+
 QString defaultDateFormat()
 {
     return QStringLiteral("dd/MM/yyyy HH:mm");

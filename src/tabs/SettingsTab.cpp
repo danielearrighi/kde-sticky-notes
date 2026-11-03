@@ -28,6 +28,18 @@
 #include <QStandardPaths>
 #include <QVBoxLayout>
 
+namespace
+{
+/// Folder the backup dialogs start in: Documents, falling back to Home.
+QString backupStartDir()
+{
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir.isEmpty())
+        dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    return dir;
+}
+} // namespace
+
 SettingsTab::SettingsTab(QWidget *parent)
     : QWidget(parent)
 {
@@ -300,7 +312,8 @@ void SettingsTab::buildUi()
             start = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
         const QString path = QFileDialog::getOpenFileName(
             this, I18n::t(QStringLiteral("settings.tray_icon_pick_title")), start,
-            I18n::t(QStringLiteral("settings.tray_icon_filter")));
+            I18n::t(QStringLiteral("settings.tray_icon_filter")), nullptr,
+            UiHelpers::fileDialogOptions());
         if (path.isEmpty())
             return;
         save(QStringLiteral("tray_icon_path"), path);
@@ -369,9 +382,7 @@ void SettingsTab::refresh()
 
 void SettingsTab::doBackup()
 {
-    QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (dir.isEmpty())
-        dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    QString dir = backupStartDir();
     const QString suggested = dir + QStringLiteral("/sticky-notes-backup-")
                               + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"))
                               + QStringLiteral(".db");
@@ -379,7 +390,9 @@ void SettingsTab::doBackup()
     const QString path = QFileDialog::getSaveFileName(this,
                                                       I18n::t(QStringLiteral("backup.save_title")),
                                                       suggested,
-                                                      I18n::t(QStringLiteral("backup.filter")));
+                                                      I18n::t(QStringLiteral("backup.filter")),
+                                                      nullptr,
+                                                      UiHelpers::fileDialogOptions());
     if (path.isEmpty())
         return;
 
@@ -397,8 +410,10 @@ void SettingsTab::doRestore()
 {
     const QString path = QFileDialog::getOpenFileName(this,
                                                       I18n::t(QStringLiteral("backup.open_title")),
-                                                      QString(),
-                                                      I18n::t(QStringLiteral("backup.filter")));
+                                                      backupStartDir(),
+                                                      I18n::t(QStringLiteral("backup.filter")),
+                                                      nullptr,
+                                                      UiHelpers::fileDialogOptions());
     if (path.isEmpty())
         return;
 

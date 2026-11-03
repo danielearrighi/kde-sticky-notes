@@ -2445,7 +2445,8 @@ void NoteWindow::exportMarkdown()
 
     QString path = QFileDialog::getSaveFileName(
         this, I18n::t(QStringLiteral("note.export_title")), suggested,
-        I18n::t(QStringLiteral("note.export_filter")));
+        I18n::t(QStringLiteral("note.export_filter")), nullptr,
+        UiHelpers::fileDialogOptions());
     if (path.isEmpty())
         return;   // cancelled
 
