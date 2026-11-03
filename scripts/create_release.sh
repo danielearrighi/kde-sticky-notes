@@ -3,10 +3,8 @@
 #
 # Release flow:
 #   1. bump project(... VERSION) in CMakeLists.txt, commit (and push)
-#   2. scripts/build_release.sh
-#   3. scripts/build_appimage.sh
-#   4. scripts/build_flatpak.sh
-#   5. scripts/create_release.sh
+#   2. scripts/build_all.sh (or the three build scripts one by one)
+#   3. scripts/create_release.sh
 #
 # The script reads the version from CMakeLists.txt, expects
 # release/sticky-notes-<version>-<arch>.AppImage, .tar.gz and .flatpak, asks for
@@ -87,8 +85,8 @@ tarball="$root/release/sticky-notes-$version-$arch.tar.gz"
 flatpak_bundle="$root/release/sticky-notes-$version-$arch.flatpak"
 for f in "$appimage" "$tarball" "$flatpak_bundle"; do
     [[ -f "$f" ]] || die "Missing $f
-Run scripts/build_release.sh, scripts/build_appimage.sh and
-scripts/build_flatpak.sh first."
+Run scripts/build_all.sh (or scripts/build_release.sh, scripts/build_appimage.sh
+and scripts/build_flatpak.sh) first."
 done
 
 # --- repository state -------------------------------------------------------

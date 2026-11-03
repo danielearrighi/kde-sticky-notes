@@ -41,6 +41,12 @@ cmake --build build
   script falls back to `flatpak run --command=flatpak-builder org.flatpak.Builder`
   (with `FLATPAK_USER_DIR` pointed at the real user installation, otherwise the
   host flatpak looks for the SDK in the Builder's own `~/.var/app` data).
+- `scripts/build_all.sh` is a convenience wrapper that runs the three builds
+  above in order (tarball, AppImage, Flatpak) and prints a summary with the
+  artifact sizes. It only forwards options (`--native`, `--skip-build`,
+  `--install`, `--keep-appdir`) and can select targets with `--only`/`--skip`;
+  each script stays the one to use for a single artifact and keeps its own
+  requirements.
 - `scripts/build_appimage.sh` still builds `build/sticky-notes` on the host:
   the AppImage bundles Qt and the loader, so the build Qt does not matter.
 - The tarball `install.sh` (`scripts/install-release.sh`) distinguishes a
