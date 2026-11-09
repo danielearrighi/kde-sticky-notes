@@ -5,6 +5,8 @@
 #include "Themes.h"
 #include "UiHelpers.h"
 
+#include <QAbstractItemView>
+#include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -13,6 +15,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -20,12 +23,15 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPainter>
 #include <QProcess>
 #include <QPushButton>
+#include <QScreen>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
 namespace
@@ -38,6 +44,107 @@ QString backupStartDir()
         dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
     return dir;
 }
+
+/// Sample font for a picker row: the family itself, at the list font size.
+QFont previewFont(const QFont &base, const QString &family)
+{
+    QFont font = base;
+    font.setFamily(family);
+    return font;
+}
+
+/// Draws a font picker row as "family name" (UI font, left) plus a short
+/// sample rendered in that family (right). Rendering the name itself in the
+/// family would make symbol/dingbat fonts unreadable.
+class FontPreviewDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    QSize sizeHint(const QStyleOptionViewItem &option,
+                   const QModelIndex &index) const override
+    {
+        QSize size = QStyledItemDelegate::sizeHint(option, index);
+        const QFont font = previewFont(option.font,
+                                       index.data(Qt::DisplayRole).toString());
+        // Script fonts can be taller than the UI font: keep the sample from
+        // being clipped vertically.
+        size.setHeight(qMax(size.height(), QFontMetrics(font).height() + 2));
+        return size;
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override
+    {
+        const QString family = index.data(Qt::DisplayRole).toString();
+        if (family.isEmpty()) {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        const QString name = opt.text;
+        opt.text.clear();
+
+        QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+
+        const QPalette::ColorRole role = opt.state & QStyle::State_Selected
+                                             ? QPalette::HighlightedText
+                                             : QPalette::Text;
+        const QColor color = opt.palette.color(role);
+        const QRect content = opt.rect.adjusted(6, 0, -6, 0);
+
+        const QString sample = QStringLiteral("Aa Bb Cc 0123");
+        const QFont sampleFont = previewFont(opt.font, family);
+        const QFontMetrics sampleMetrics(sampleFont);
+        const int sampleWidth = qMin(sampleMetrics.horizontalAdvance(sample),
+                                     content.width() / 2);
+        const QRect sampleRect(content.right() - sampleWidth + 1, content.top(),
+                               sampleWidth, content.height());
+
+        painter->save();
+        painter->setFont(sampleFont);
+        painter->setPen(color);
+        painter->drawText(sampleRect, Qt::AlignVCenter | Qt::AlignRight,
+                          sampleMetrics.elidedText(sample, Qt::ElideRight,
+                                                   sampleRect.width()));
+        painter->restore();
+
+        const int nameWidth = qMax(0, sampleRect.left() - content.left() - 8);
+        painter->save();
+        painter->setFont(opt.font);
+        painter->setPen(color);
+        painter->drawText(QRect(content.left(), content.top(), nameWidth, content.height()),
+                          Qt::AlignVCenter | Qt::AlignLeft,
+                          opt.fontMetrics.elidedText(name, Qt::ElideRight, nameWidth));
+        painter->restore();
+    }
+};
+
+/// QComboBox whose popup is twice as wide as the closed combo: each row shows
+/// the family name plus a font sample, so the preview needs the extra room.
+class FontComboBox : public QComboBox
+{
+public:
+    using QComboBox::QComboBox;
+
+    void showPopup() override
+    {
+        // Size the popup before Qt shows it: setting the width afterwards can
+        // leave the item rows wider than the popup frame. Clamp to the screen
+        // so a very wide hub does not push the popup off-screen.
+        const int screenWidth = screen() ? screen()->availableGeometry().width()
+                                         : width() * 2;
+        const int wanted = qMin(width() * 2, qMax(width(), screenWidth - 40));
+        view()->setMinimumWidth(wanted);
+        QComboBox::showPopup();
+        // Do not let the popup width leak into the combo's size hint: that
+        // would widen the whole settings form.
+        view()->setMinimumWidth(0);
+    }
+};
 } // namespace
 
 SettingsTab::SettingsTab(QWidget *parent)
@@ -108,11 +215,12 @@ void SettingsTab::buildUi()
     m_defaultHeight->setRange(100, 2000);
     m_defaultHeight->setSuffix(QStringLiteral(" px"));
 
-    m_fontFamily = new QComboBox;
+    m_fontFamily = new FontComboBox;
     m_fontFamily->setEditable(true);
+    m_fontFamily->setItemDelegate(new FontPreviewDelegate(m_fontFamily));
     for (const QString &f : {QStringLiteral("DejaVu Sans"), QStringLiteral("Noto Sans"),
                              QStringLiteral("Ubuntu"), QStringLiteral("Comic Sans MS"),
-                             QStringLiteral("Monospace")})
+                             QStringLiteral("Monospace"), QStringLiteral("URW Chancery L")})
         m_fontFamily->addItem(f);
     m_fontSize = new QSpinBox;
     m_fontSize->setRange(7, 28);
