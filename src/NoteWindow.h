@@ -234,6 +234,11 @@ private:
     void toggleItalic();
     void toggleUnderline();
     void toggleStrike();
+    /// Applies/removes the character format of Markdown inline code (`code`).
+    void toggleInlineCode();
+    /// Turns the selected paragraphs (or the current one) into a fenced code
+    /// block (```...```) and back.
+    void toggleCodeBlock();
     void makeList(bool numbered);
     void clearFormatting();
 

@@ -100,6 +100,11 @@ constexpr qreal kListIndentWidth = 25; //Default QTextListFormat indent.
 // note content as a base64 data URL (so it travels with the backups), hence it
 // is shrunk to something reasonable instead of being stored verbatim.
 constexpr int kMaxImageSide = 900;
+// Alpha of the black veil painted behind inline code and code blocks. It is
+// translucent, so it darkens whatever note colour is behind it (the body is
+// transparent and the card paints the theme): this works on light pastel themes
+// and on dark custom ones without computing a colour per theme.
+constexpr int kCodeBackgroundAlpha = 25;
 
 // ---- screen identity -------------------------------------------------------
 
@@ -248,6 +253,167 @@ void applyLinkFormatToAnchors(QTextDocument *doc, int from, int to, const QColor
         c.setPosition(range.first);
         c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
         c.mergeCharFormat(link);
+    }
+    c.endEditBlock();
+}
+
+/// Background painted behind code. A translucent veil blends with the note
+/// colour painted by the card: black darkens the light builtin themes, while a
+/// dark custom theme gets a slightly lighter panel (a darker one would be
+/// invisible against it).
+QColor codeBackgroundColor(const QString &noteBody)
+{
+    const QColor body(noteBody);
+    const bool dark = body.isValid() && body.lightness() < 128;
+    return dark ? QColor(255, 255, 255, kCodeBackgroundAlpha)
+                : QColor(0, 0, 0, kCodeBackgroundAlpha);
+}
+
+/// Character format of Markdown inline code (`code`). Qt's Markdown importer
+/// marks it with the "monospace" family and the fixed-pitch flag; the same
+/// properties make QTextDocument::toMarkdown() write the backticks back. The
+/// background is only cosmetic and never reaches the Markdown output.
+QTextCharFormat inlineCodeFormat(const QColor &background)
+{
+    QTextCharFormat fmt;
+    fmt.setFontFamilies({QStringLiteral("monospace")});
+    fmt.setFontStyleHint(QFont::Monospace);
+    fmt.setFontFixedPitch(true);
+    fmt.setBackground(background);
+    return fmt;
+}
+
+/// Character format of the text inside a Markdown code block. The block format
+/// is what makes it a fenced block (see NoteWindow::toggleCodeBlock()); here the
+/// monospace family only gives it the look that setMarkdown() produces. The
+/// fixed-pitch flag is left off so the block is not mistaken for inline code.
+QTextCharFormat codeBlockCharFormat()
+{
+    QTextCharFormat fmt;
+    fmt.setFontFamilies({QStringLiteral("monospace")});
+    fmt.setFontStyleHint(QFont::Monospace);
+    fmt.setFontFixedPitch(false);
+    return fmt;
+}
+
+/// True when \a fmt is the character format of Markdown inline code. A code
+/// block is recognized from its block format instead (see isCodeBlock()).
+bool isInlineCode(const QTextCharFormat &fmt)
+{
+    return fmt.fontFixedPitch();
+}
+
+/// True when \a fmt is the block format of a fenced code block.
+bool isCodeBlock(const QTextBlockFormat &fmt)
+{
+    return fmt.hasProperty(QTextFormat::BlockCodeFence);
+}
+
+/// Format of the character immediately before \a position, read from the
+/// document. A cursor taken from the editor can keep a stale cached format after
+/// a change made through another cursor; a fresh cursor always re-reads it. At
+/// position 0 there is no preceding character, so the default format is
+/// returned, which is exactly what an editor cursor reports there.
+QTextCharFormat formatBefore(QTextDocument *doc, int position)
+{
+    QTextCursor c(doc);
+    c.setPosition(position);
+    return c.charFormat();
+}
+
+/// Character format that brings text back to the note font: it overrides the
+/// monospace family and the fixed-pitch flag left by the code formatting.
+/// Merging it (instead of replacing the whole format) keeps bold, italic and
+/// links intact.
+QTextCharFormat normalFontFormat(const QTextDocument *doc)
+{
+    QTextCharFormat fmt;
+    fmt.setFontFamilies({doc->defaultFont().family()});
+    fmt.setFontStyleHint(QFont::AnyStyle);
+    fmt.setFontFixedPitch(false);
+    // Also drop the code background. Merge cannot clear a property, so it is
+    // overridden with a NoBrush one (no fill): the note or code-block background
+    // underneath shows through again.
+    fmt.setBackground(QBrush(Qt::NoBrush));
+    return fmt;
+}
+
+/// Merges \a fmt into every text fragment of [from, to). The ranges are collected
+/// first and each fragment is handled on its own: one merge over the whole range
+/// would apply the first fragment's format to the others, dropping their
+/// bold/italic/link properties. Image fragments are skipped, since merging into
+/// them would replace the image format.
+void applyCharFormatToRange(QTextDocument *doc, int from, int to,
+                            const QTextCharFormat &fmt)
+{
+    if (!doc || from >= to)
+        return;
+
+    QList<QPair<int, int>> ranges;   // (position, length)
+    for (QTextBlock block = doc->findBlock(from);
+         block.isValid() && block.position() < to; block = block.next()) {
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment fragment = it.fragment();
+            if (!fragment.isValid() || fragment.charFormat().isImageFormat())
+                continue;
+            const int start = qMax(fragment.position(), from);
+            const int end = qMin(fragment.position() + fragment.length(), to);
+            if (start < end)
+                ranges.append({start, end - start});
+        }
+    }
+
+    QTextCursor c(doc);
+    c.beginEditBlock();
+    for (const QPair<int, int> &range : ranges) {
+        c.setPosition(range.first);
+        c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
+        c.mergeCharFormat(fmt);
+    }
+    c.endEditBlock();
+}
+
+/// Paints the code background: the paragraph for a fenced code block, the text
+/// itself for inline code. Markdown carries no background, and the note colour
+/// can change with the theme, so this runs after loading a note and in
+/// applyStyle() every time the theme is applied.
+void applyCodeBackgrounds(QTextDocument *doc, const QColor &color)
+{
+    if (!doc)
+        return;
+
+    QTextCharFormat inlineFmt;
+    inlineFmt.setBackground(color);
+    QList<QPair<int, int>> inlineRanges;   // (position, length)
+    QList<int> blockPositions;
+
+    for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
+        if (isCodeBlock(block.blockFormat()))
+            blockPositions.append(block.position());
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment fragment = it.fragment();
+            if (!fragment.isValid() || fragment.charFormat().isImageFormat())
+                continue;
+            if (isInlineCode(fragment.charFormat()))
+                inlineRanges.append({fragment.position(), fragment.length()});
+        }
+    }
+
+    QTextCursor c(doc);
+    c.beginEditBlock();
+    // The positions are collected first: changing a format can split or merge
+    // fragments and would invalidate the iterators.
+    for (int position : blockPositions) {
+        QTextBlock block = doc->findBlock(position);
+        QTextBlockFormat bf = block.blockFormat();
+        bf.setBackground(color);
+        QTextCursor blockCursor(block);
+        blockCursor.setBlockFormat(bf);
+    }
+    for (const QPair<int, int> &range : inlineRanges) {
+        c.setPosition(range.first);
+        c.setPosition(range.first + range.second, QTextCursor::KeepAnchor);
+        c.mergeCharFormat(inlineFmt);
     }
     c.endEditBlock();
 }
@@ -1489,6 +1655,10 @@ void NoteWindow::applyStyle()
     applyLinkFormatToAnchors(doc, 0, doc->characterCount(),
                              m_body->palette().color(QPalette::Link));
 
+    // A code background is cosmetic and not part of Markdown: re-paint it here
+    // (the initial load included) and keep it in step with the theme colour.
+    applyCodeBackgrounds(doc, codeBackgroundColor(m_theme.body));
+
     // The note background is painted by hand from m_theme (see paintCard()):
     // force a repaint so a theme change is reflected right away.
     m_card->update();
@@ -2304,6 +2474,84 @@ void NoteWindow::toggleStrike()
     m_body->mergeCurrentCharFormat(fmt);
 }
 
+void NoteWindow::toggleInlineCode()
+{
+    // The format of the last selected character (or of the one before the caret)
+    // says whether the code formatting is already on. A fresh read from the
+    // document avoids the editor's cached (and possibly stale) char format.
+    const QTextCursor cursor = m_body->textCursor();
+    const bool on = !isInlineCode(formatBefore(m_body->document(),
+                                               cursor.selectionEnd()));
+
+    // mergeCurrentCharFormat() applies the format to the selection, if any, by
+    // merging: bold, italic and links inside it survive, and the insertion
+    // format is updated in step, so typing right after the toggle is consistent.
+    m_body->mergeCurrentCharFormat(
+        on ? inlineCodeFormat(codeBackgroundColor(m_theme.body))
+           : normalFontFormat(m_body->document()));
+}
+
+void NoteWindow::toggleCodeBlock()
+{
+    QTextDocument *doc = m_body->document();
+    QTextCursor c = m_body->textCursor();
+
+    QTextBlock first = doc->findBlock(c.selectionStart());
+    QTextBlock last = doc->findBlock(c.selectionEnd());
+    if (!first.isValid())
+        return;
+    // A selection ending exactly at the beginning of a block does not include
+    // that block, as with QTextCursor's own block operations.
+    if (last != first && c.selectionEnd() == last.position())
+        last = last.previous();
+
+    const bool on = !isCodeBlock(first.blockFormat());
+
+    c.beginEditBlock();
+
+    QTextBlockFormat bf = first.blockFormat();
+    if (on) {
+        // A fenced block is a paragraph on its own: a list, heading or quote
+        // would keep the Markdown writer from emitting the fence, so drop them.
+        bf.setProperty(QTextFormat::BlockCodeFence, QStringLiteral("```"));
+        bf.setProperty(QTextFormat::BlockCodeLanguage, QString());
+        bf.setProperty(QTextFormat::BlockNonBreakableLines, true);
+        bf.clearProperty(QTextFormat::HeadingLevel);
+        bf.clearProperty(QTextFormat::BlockQuoteLevel);
+        bf.clearProperty(QTextFormat::ObjectIndex);
+        bf.setIndent(0);
+        bf.setBackground(codeBackgroundColor(m_theme.body));
+    } else {
+        bf.clearProperty(QTextFormat::BlockCodeFence);
+        bf.clearProperty(QTextFormat::BlockCodeLanguage);
+        bf.clearProperty(QTextFormat::BlockNonBreakableLines);
+        bf.clearBackground();
+    }
+
+    for (QTextBlock b = first; b.isValid(); b = b.next()) {
+        if (on) {
+            // A list item cannot carry a fence in Markdown: detach it first.
+            if (QTextList *list = b.textList())
+                list->remove(b);
+        }
+        QTextCursor blockCursor(b);
+        blockCursor.setBlockFormat(bf);
+        if (b == last)
+            break;
+    }
+
+    // The whole paragraphs get the code font, not only the selected text: the
+    // block format above applies to entire blocks too.
+    const QTextCharFormat font = on ? codeBlockCharFormat() : normalFontFormat(doc);
+    applyCharFormatToRange(doc, first.position(), last.position() + last.length() - 1,
+                           font);
+    // Also update the insertion format (and merge into the selected text) without
+    // replacing the bold/italic/links the fragments may carry.
+    m_body->mergeCurrentCharFormat(font);
+
+    c.endEditBlock();
+}
+
 void NoteWindow::makeList(bool numbered)
 {
     QTextCursor c = m_body->textCursor();
@@ -2374,13 +2622,21 @@ void NoteWindow::clearFormatting()
     // A white background pasted from a web page can also be stored in the
     // block format (paragraph background) and in the block char format (the
     // paragraph mark), which the character format reset does not touch. Lists,
-    // indentation and alignment are preserved.
+    // indentation and alignment are preserved. A code block, instead, is
+    // dropped: the character reset above already removed its monospace font, so
+    // keeping the fence would leave a code block rendered as normal text.
     for (QTextBlock block = doc->findBlock(start);
          block.isValid() && block.position() < end; block = block.next()) {
         QTextBlockFormat bf = block.blockFormat();
         QTextCursor blockCursor(block);
         if (bf.hasProperty(QTextFormat::BackgroundBrush)) {
             bf.clearBackground();
+            blockCursor.setBlockFormat(bf);
+        }
+        if (isCodeBlock(bf)) {
+            bf.clearProperty(QTextFormat::BlockCodeFence);
+            bf.clearProperty(QTextFormat::BlockCodeLanguage);
+            bf.clearProperty(QTextFormat::BlockNonBreakableLines);
             blockCursor.setBlockFormat(bf);
         }
         blockCursor.setBlockCharFormat(clean);
@@ -2550,6 +2806,15 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         return button;
     };
 
+    // The inline-code state follows the document at the selection end, not the
+    // editor's stored insertion format: the latter can be stale right after a
+    // toggle or a formatting pass and would keep the button checked when it
+    // should be off.
+    const auto inlineCodeState = [this] {
+        const QTextCursor cursor = m_body->textCursor();
+        return isInlineCode(formatBefore(m_body->document(), cursor.selectionEnd()));
+    };
+
     const MenuSection styleSection = makeSection(I18n::t(QStringLiteral("format.style")));
     QToolButton *bold = makeSectionButton(styleSection, QStringLiteral("format-text-bold"),
                                           I18n::t(QStringLiteral("format.bold")),
@@ -2566,16 +2831,22 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
                                             QStringLiteral("format-text-strikethrough"),
                                             I18n::t(QStringLiteral("format.strikethrough")),
                                             QKeySequence(), true, cur.fontStrikeOut());
+    QToolButton *inlineCode = makeSectionButton(styleSection,
+                                                QStringLiteral("format-text-code"),
+                                                I18n::t(QStringLiteral("format.inline_code")),
+                                                QKeySequence(), true, inlineCodeState());
     QToolButton *clear = makeSectionButton(styleSection, QStringLiteral("draw-eraser"),
                                            I18n::t(QStringLiteral("format.clear")),
                                            QKeySequence(), false, false);
 
-    const auto syncStyleButtons = [this, bold, ital, under, strike] {
+    const auto syncStyleButtons = [this, bold, ital, under, strike, inlineCode,
+                                   inlineCodeState] {
         const QTextCharFormat fmt = m_body->currentCharFormat();
         bold->setChecked(fmt.fontWeight() == QFont::Bold);
         ital->setChecked(fmt.fontItalic());
         under->setChecked(fmt.fontUnderline());
         strike->setChecked(fmt.fontStrikeOut());
+        inlineCode->setChecked(inlineCodeState());
     };
 
     connect(bold, &QToolButton::clicked, this, [this, syncStyleButtons] {
@@ -2594,6 +2865,10 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
         toggleStrike();
         syncStyleButtons();
     });
+    connect(inlineCode, &QToolButton::clicked, this, [this, syncStyleButtons] {
+        toggleInlineCode();
+        syncStyleButtons();
+    });
     connect(clear, &QToolButton::clicked, this, [this, syncStyleButtons] {
         clearFormatting();
         syncStyleButtons();
@@ -2603,7 +2878,8 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     styleAction->setDefaultWidget(styleSection.row);
     menu.addAction(styleAction);
 
-    // Paragraph section: the two list styles as icon-only buttons, like Stile.
+    // Paragraph section: the two list styles and the code block as icon-only
+    // buttons, like the Style section.
     const MenuSection paragraphSection =
         makeSection(I18n::t(QStringLiteral("format.paragraph")));
     QToolButton *bullets = makeSectionButton(
@@ -2612,24 +2888,33 @@ void NoteWindow::buildContextMenu(const QPoint &globalPos)
     QToolButton *numbers = makeSectionButton(
         paragraphSection, QStringLiteral("format-list-ordered"),
         I18n::t(QStringLiteral("format.numbered_list")), QKeySequence(), true, false);
+    QToolButton *codeBlock = makeSectionButton(
+        paragraphSection, QStringLiteral("code-block"),
+        I18n::t(QStringLiteral("format.code_block")), QKeySequence(), true, false);
 
-    const auto syncListButtons = [this, bullets, numbers] {
-        const QTextList *list = m_body->textCursor().currentList();
+    const auto syncParagraphButtons = [this, bullets, numbers, codeBlock] {
+        const QTextCursor cursor = m_body->textCursor();
+        const QTextList *list = cursor.currentList();
         const QTextListFormat::Style listStyle = list
                                                      ? list->format().style()
                                                      : QTextListFormat::ListStyleUndefined;
         bullets->setChecked(listStyle == QTextListFormat::ListDisc);
         numbers->setChecked(listStyle == QTextListFormat::ListDecimal);
+        codeBlock->setChecked(isCodeBlock(cursor.blockFormat()));
     };
-    syncListButtons();
+    syncParagraphButtons();
 
-    connect(bullets, &QToolButton::clicked, this, [this, syncListButtons] {
+    connect(bullets, &QToolButton::clicked, this, [this, syncParagraphButtons] {
         makeList(false);
-        syncListButtons();
+        syncParagraphButtons();
     });
-    connect(numbers, &QToolButton::clicked, this, [this, syncListButtons] {
+    connect(numbers, &QToolButton::clicked, this, [this, syncParagraphButtons] {
         makeList(true);
-        syncListButtons();
+        syncParagraphButtons();
+    });
+    connect(codeBlock, &QToolButton::clicked, this, [this, syncParagraphButtons] {
+        toggleCodeBlock();
+        syncParagraphButtons();
     });
 
     auto *paragraphAction = new QWidgetAction(&menu);

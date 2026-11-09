@@ -67,6 +67,8 @@
   "format.italic": "Corsivo",
   "format.underline": "Sottolineato",
   "format.strikethrough": "Barrato",
+  "format.inline_code": "Codice in linea",
+  "format.code_block": "Blocco di codice",
   "format.bulleted_list": "Elenco puntato",
   "format.numbered_list": "Elenco numerato",
   "format.clear": "Rimuovi formattazione",

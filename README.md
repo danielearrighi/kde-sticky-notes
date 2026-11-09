@@ -166,7 +166,7 @@ start, so a broken update can be recovered by hand.
 - **Move and resize notes** — drag from the title bar, resize from the
   bottom-right corner.
 - **Markdown content** — write freely and format it (bold, italic, underline,
-  strikethrough, lists) from the right-click menu.
+  strikethrough, inline code, code blocks, lists) from the right-click menu.
 - **Theming** — pick a color/theme per note, configure a default theme and font,
   and build your own themes with the color picker in the settings.
 - **Always on top or on the desktop** — per note, from the context menu.

@@ -67,6 +67,8 @@
   "format.italic": "Italic",
   "format.underline": "Underline",
   "format.strikethrough": "Strikethrough",
+  "format.inline_code": "Inline code",
+  "format.code_block": "Code block",
   "format.bulleted_list": "Bulleted list",
   "format.numbered_list": "Numbered list",
   "format.clear": "Clear formatting",

@@ -67,6 +67,8 @@
   "format.italic": "Cursiva",
   "format.underline": "Subrayado",
   "format.strikethrough": "Tachado",
+  "format.inline_code": "Código en línea",
+  "format.code_block": "Bloque de código",
   "format.bulleted_list": "Lista con viñetas",
   "format.numbered_list": "Lista numerada",
   "format.clear": "Quitar formato",
