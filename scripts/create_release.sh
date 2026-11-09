@@ -6,12 +6,14 @@
 #   2. scripts/build_all.sh (or the three build scripts one by one)
 #   3. scripts/create_release.sh
 #
-# The script reads the version from CMakeLists.txt, expects
-# release/sticky-notes-<version>-<arch>.AppImage, .tar.gz and .flatpak, asks for
-# the release notes (multi-line Markdown in $EDITOR), creates the tag on the
-# remote at HEAD and uploads the three files plus SHA256SUMS (which the app
-# checks before installing an update). It never commits or pushes code on its
-# own: if HEAD is not pushed yet it asks first.
+# The script reads the version from CMakeLists.txt, collects the artifacts of
+# every supported architecture that are present in release/
+# (sticky-notes-<version>-<arch>.AppImage, .tar.gz and .flatpak for x86_64 and
+# aarch64), asks for the release notes (multi-line Markdown in $EDITOR),
+# creates the tag on the remote at HEAD and uploads the files plus SHA256SUMS
+# (which the app checks before installing an update). Missing architectures are
+# a warning, not an error: a release can ship what was built. It never commits
+# or pushes code on its own: if HEAD is not pushed yet it asks first.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
@@ -25,8 +27,9 @@ usage() {
     cat <<'EOF'
 Usage: scripts/create_release.sh [options]
 
-Creates the GitHub release for the version in CMakeLists.txt, uploading
-release/sticky-notes-<version>-<arch>.AppImage, .tar.gz, .flatpak and SHA256SUMS.
+Creates the GitHub release for the version in CMakeLists.txt, uploading every
+artifact found in release/ (sticky-notes-<version>-<arch>.AppImage, .tar.gz and
+.flatpak for x86_64 and aarch64) plus SHA256SUMS.
 
 Options:
   -y, --yes              do not ask for confirmation
@@ -74,20 +77,34 @@ version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMake
 [[ -n "$version" ]] || die "Could not read the version from CMakeLists.txt"
 tag="v$version"
 
-arch="$(uname -m)"
-case "$arch" in
-    x86_64|aarch64) ;;
-    *) die "Unsupported architecture: $arch (need x86_64 or aarch64)" ;;
-esac
+# Every artifact that build_all.sh can produce. Whatever is in release/ is
+# uploaded; a missing architecture is reported but does not stop the release.
+archs=(x86_64 aarch64)
+assets=()
+missing=()
 
-appimage="$root/release/sticky-notes-$version-$arch.AppImage"
-tarball="$root/release/sticky-notes-$version-$arch.tar.gz"
-flatpak_bundle="$root/release/sticky-notes-$version-$arch.flatpak"
-for f in "$appimage" "$tarball" "$flatpak_bundle"; do
-    [[ -f "$f" ]] || die "Missing $f
-Run scripts/build_all.sh (or scripts/build_release.sh, scripts/build_appimage.sh
-and scripts/build_flatpak.sh) first."
+add_asset() { # path
+    if [[ -f "$1" ]]; then
+        assets+=("$1")
+    else
+        missing+=("$(basename "$1")")
+    fi
+}
+
+for arch in "${archs[@]}"; do
+    add_asset "$root/release/sticky-notes-$version-$arch.AppImage"
+    add_asset "$root/release/sticky-notes-$version-$arch.tar.gz"
+    add_asset "$root/release/sticky-notes-$version-$arch.flatpak"
 done
+
+((${#assets[@]})) \
+    || die "No release artifacts for $version in $root/release
+Run scripts/build_all.sh (or the three build scripts) first."
+
+if ((${#missing[@]})); then
+    log "Not built, not uploaded: ${missing[*]}"
+    log "Run scripts/build_all.sh to produce every architecture"
+fi
 
 # --- repository state -------------------------------------------------------
 
@@ -154,24 +171,29 @@ fi
 grep -q '[^[:space:]]' "$notes_tmp" || die "Empty release notes, aborted"
 
 # Checksums: the app verifies the downloaded asset against this file before
-# replacing itself, so every release must carry it.
+# replacing itself, so every release must carry it. The updater looks the file
+# up by name, so one SHA256SUMS covering all architectures is fine.
 sums="$root/release/SHA256SUMS"
+asset_names=()
+for f in "${assets[@]}"; do
+    asset_names+=("$(basename "$f")")
+done
+
 if ((dry_run)); then
-    log "Would write $sums"
+    log "Would write $sums for ${#asset_names[@]} files"
 else
-    ( cd "$root/release" \
-        && sha256sum "$(basename "$appimage")" "$(basename "$tarball")" \
-                      "$(basename "$flatpak_bundle")" > "$sums" ) \
+    ( cd "$root/release" && sha256sum "${asset_names[@]}" > "$sums" ) \
         || die "Could not write $sums"
 fi
 
 printf '\n----- release notes for %s -----\n' "$tag"
 cat "$notes_tmp"
 printf -- '--------------------------------\n\n'
-printf 'Assets:\n  %s (%s)\n  %s (%s)\n  %s (%s)\n\n' \
-    "$(basename "$appimage")" "$(du -h "$appimage" | cut -f1)" \
-    "$(basename "$tarball")" "$(du -h "$tarball" | cut -f1)" \
-    "$(basename "$flatpak_bundle")" "$(du -h "$flatpak_bundle" | cut -f1)"
+printf 'Assets:\n'
+for f in "${assets[@]}"; do
+    printf '  %s (%s)\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+done
+printf '\n'
 
 confirm "Create release $tag and upload these files?" || die "Aborted"
 
@@ -182,7 +204,7 @@ run gh release create "$tag" \
     --title "$tag" \
     --notes-file "$notes_tmp" \
     --target "$(git rev-parse HEAD)" \
-    "$appimage" "$tarball" "$flatpak_bundle" "$sums"
+    "${assets[@]}" "$sums"
 
 if ((dry_run)); then
     log "Dry run: nothing was created"

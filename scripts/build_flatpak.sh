@@ -11,23 +11,28 @@
 # Requirements:
 #   - flatpak
 #   - flatpak-builder, or the org.flatpak.Builder app from Flathub
-#   - org.kde.Sdk//6.10: flatpak install flathub org.kde.Sdk//6.10
+#   - org.kde.Sdk//6.10 for the target architecture:
+#       flatpak install flathub org.kde.Sdk//6.10
+#       flatpak install --arch=aarch64 flathub org.kde.Sdk//6.10
+#   - for --arch of another architecture: QEMU user mode (binfmt_misc), because
+#     flatpak-builder runs the target toolchain to compile LayerShellQt and the
+#     app inside the runtime of that architecture
 #
-# Usage: scripts/build_flatpak.sh [--install] [--skip-build] [--clean]
+# Usage: scripts/build_flatpak.sh [--arch ARCH] [--install] [--skip-build] [--clean]
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
 root="$(cd "$here/.." && pwd)"                                 # repository root
 
+# shellcheck source=lib/arch.sh
+source "$here/lib/arch.sh"
+
 app_id="io.github.danielearrighi.StickyNotes"
 branch="stable"
 manifest="$root/packaging/$app_id.yml"
-work="$root/build-flatpak"
-build_dir="$work/build"
-repo_dir="$work/repo"
-state_dir="$work/state"
 release_dir="$root/release"
 
+arch=""
 runtime_version=""
 install_bundle=0
 skip_build=0
@@ -41,9 +46,14 @@ Builds release/sticky-notes-<version>-<arch>.flatpak from the current working
 tree, against org.kde.Platform 6.10 (Qt 6.10) and LayerShellQt 6.6.
 
 Options:
+  --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).
+                   A foreign architecture needs the SDK for that architecture
+                   and QEMU user mode (binfmt_misc)
   --install        install the bundle with "flatpak install --user --reinstall"
+                   (host architecture only)
   --skip-build     reuse the build/repo from a previous run, only rebuild the bundle
-  --clean          remove build-flatpak/ and the generated .flatpak, then exit
+  --clean          remove the build tree of this architecture and the generated
+                   .flatpak, then exit
   -h, --help       show this help
 
 Environment:
@@ -53,6 +63,7 @@ EOF
 
 while (($#)); do
     case "$1" in
+        --arch)          arch="${2:?--arch needs an architecture}"; shift ;;
         --install)       install_bundle=1 ;;
         --skip-build)    skip_build=1 ;;
         --clean)         clean_only=1 ;;
@@ -62,25 +73,27 @@ while (($#)); do
     shift
 done
 
+arch="${arch:-$(sn_host_arch)}"
+sn_known_arch "$arch" || { echo "Unsupported architecture: $arch (need x86_64 or aarch64)" >&2; exit 1; }
+
+work="$root/build-flatpak-$arch"
+build_dir="$work/build"
+repo_dir="$work/repo"
+state_dir="$work/state"
+
 log() { printf '[build_flatpak] %s\n' "$*"; }
 die() { printf 'build_flatpak: %s\n' "$*" >&2; exit 1; }
 
 if ((clean_only)); then
     rm -rf "$work"
-    rm -f "$release_dir"/*.flatpak
-    log "Removed $work and the .flatpak bundles in $release_dir"
+    rm -f "$release_dir"/*-"$arch".flatpak
+    log "Removed $work and the .flatpak bundles for $arch in $release_dir"
     exit 0
 fi
 
 command -v flatpak >/dev/null 2>&1 || die "flatpak is not installed"
 
 # --- architecture and manifest ---------------------------------------------
-
-arch="$(uname -m)"
-case "$arch" in
-    x86_64|aarch64) ;;
-    *) die "Unsupported architecture: $arch (need x86_64 or aarch64)" ;;
-esac
 
 [[ -f "$manifest" ]] || die "Missing manifest: $manifest"
 
@@ -114,8 +127,11 @@ else
     die "flatpak-builder not found: install it (e.g. dnf install flatpak-builder) or org.flatpak.Builder from Flathub"
 fi
 
+# A foreign architecture is compiled inside the runtime through QEMU user mode.
+sn_require_binfmt "$arch"
+
 flatpak info --arch="$arch" "org.kde.Sdk//$runtime_version" >/dev/null 2>&1 \
-    || die "Missing org.kde.Sdk//$runtime_version: flatpak install flathub org.kde.Sdk//$runtime_version"
+    || die "Missing org.kde.Sdk//$runtime_version for $arch: flatpak install --arch=$arch flathub org.kde.Sdk//$runtime_version"
 
 # --- version ----------------------------------------------------------------
 
@@ -160,7 +176,11 @@ log "Built $bundle ($(du -h "$bundle" | cut -f1))"
 log "Requires the Flatpak runtime org.kde.Platform/$arch/$runtime_version"
 
 if ((install_bundle)); then
-    log "Installing $bundle"
-    flatpak install --user --noninteractive --reinstall "$bundle"
-    log "Run it with: flatpak run $app_id"
+    if sn_is_native "$arch"; then
+        log "Installing $bundle"
+        flatpak install --user --noninteractive --reinstall "$bundle"
+        log "Run it with: flatpak run $app_id"
+    else
+        log "Not installing $bundle: it is built for $arch, not for this host"
+    fi
 fi

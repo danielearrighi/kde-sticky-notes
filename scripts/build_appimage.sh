@@ -12,34 +12,66 @@
 # this script runs on a rolling release (glibc 2.44 on Tumbleweed), while the
 # AppImageHub test runs on the oldest Ubuntu LTS still in standard support
 # (glibc 2.35), and an AppImage must run on both.
+#
+# --arch selects the target architecture (default: the host one). linuxdeploy,
+# the Qt plugin and appimagetool only exist as binaries for their own
+# architecture, and they must run next to the Qt of that architecture, so a
+# foreign architecture is built by re-running this script inside the aarch64
+# build container (scripts/container/ubuntu26.04.Dockerfile) through QEMU user
+# emulation. The x86_64 AppImage keeps being built on the host with the host Qt.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
 root="$(cd "$here/.." && pwd)"                                 # repository root
 
+# shellcheck source=lib/arch.sh
+source "$here/lib/arch.sh"
+
+dockerfile="$here/container/ubuntu26.04.Dockerfile"
+image_base="${STICKY_NOTES_BUILD_IMAGE:-sticky-notes-build:ubuntu26.04}"
+
+arch=""
+engine=""
 skip_build=0
 keep_appdir=0
 clean_only=0
+rebuild_image=0
 
 usage() {
     cat <<'EOF'
 Usage: scripts/build_appimage.sh [options]
 
 Options:
-  --skip-build    reuse the existing build/sticky-notes (do not run CMake)
-  --keep-appdir   keep the temporary AppDir used to assemble the AppImage
-  --clean         remove downloaded tools/ and AppDir/, then exit
-  -h, --help      show this help
+  --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).
+                   A foreign architecture is built inside an emulated container
+                   and needs QEMU user mode (binfmt_misc)
+  --engine NAME    container engine used for a foreign architecture
+                   (podman or docker; default: auto)
+  --image TAG      base build image tag (default: sticky-notes-build:ubuntu26.04;
+                   the architecture is appended, so each arch has its own image)
+  --rebuild-image  rebuild the container image from scratch (--no-cache)
+  --skip-build     reuse the existing build-appimage-<arch>/sticky-notes
+  --keep-appdir    keep the temporary AppDir used to assemble the AppImage
+  --clean          remove downloaded tools/, AppDir/ and the build trees, then exit
+  -h, --help       show this help
+
+Environment:
+  CONTAINER_ENGINE          same as --engine
+  STICKY_NOTES_BUILD_IMAGE  same as --image
 EOF
 }
 
 while (($#)); do
     case "$1" in
-        --skip-build)  skip_build=1 ;;
-        --keep-appdir) keep_appdir=1 ;;
-        --clean)       clean_only=1 ;;
-        -h|--help)     usage; exit 0 ;;
-        *)             echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+        --arch)          arch="${2:?--arch needs an architecture}"; shift ;;
+        --engine)        engine="${2:?--engine needs a name}"; shift ;;
+        --image)         image_base="${2:?--image needs a tag}"; shift ;;
+        --rebuild-image) rebuild_image=1 ;;
+        --skip-build)    skip_build=1 ;;
+        --keep-appdir)   keep_appdir=1 ;;
+        --clean)         clean_only=1 ;;
+        -h|--help)       usage; exit 0 ;;
+        *)               echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
     esac
     shift
 done
@@ -47,29 +79,75 @@ done
 tools_dir="$here/tools"
 appdir="$here/AppDir"
 
+log() { printf '[build_appimage] %s\n' "$*"; }
+die() { printf 'build_appimage: %s\n' "$*" >&2; exit 1; }
+
 if ((clean_only)); then
     rm -rf "$tools_dir" "$appdir"
-    echo "Removed $tools_dir and $appdir"
+    rm -rf "$root"/build-appimage-*
+    echo "Removed $tools_dir, $appdir and the AppImage build trees"
     exit 0
 fi
 
-log() { printf '[build_appimage] %s\n' "$*"; }
+arch="${arch:-$(sn_host_arch)}"
+sn_known_arch "$arch" || die "Unsupported architecture: $arch (need x86_64 or aarch64)"
+platform="$(sn_platform "$arch")"
+
+# --- foreign architecture: rebuild inside a container of that architecture --
+
+if ! sn_is_native "$arch"; then
+    [[ -z "${STICKY_NOTES_IN_CONTAINER:-}" ]] \
+        || die "Nested cross build for $arch inside the container"
+    sn_require_binfmt "$arch"
+    [[ -f "$dockerfile" ]] || die "Missing $dockerfile"
+
+    if [[ -z "$engine" ]]; then
+        engine="$(sn_container_engine || true)"
+    fi
+    [[ -n "$engine" ]] || die "No container engine found: install podman or docker to build the $arch AppImage"
+    command -v "$engine" >/dev/null 2>&1 || die "Container engine not found: $engine"
+
+    image="$image_base-$arch"
+    if ((rebuild_image)); then
+        log "Rebuilding $image from scratch"
+        "$engine" build --no-cache --platform "$platform" -t "$image" -f "$dockerfile" "$here/container"
+    elif ! "$engine" image inspect "$image" >/dev/null 2>&1; then
+        log "Building $image (first run only)"
+        "$engine" build --platform "$platform" -t "$image" -f "$dockerfile" "$here/container"
+    else
+        log "Reusing image $image"
+    fi
+
+    # Run as the invoking user so the build tree is not left owned by root, and
+    # force APPIMAGE_EXTRACT_AND_RUN: inside the container the AppImage tools
+    # cannot mount themselves.
+    run_args=(--rm --platform "$platform" -v "$root:/work:Z" -w /work
+              -e HOME=/tmp -e APPIMAGE_EXTRACT_AND_RUN=1
+              -e STICKY_NOTES_IN_CONTAINER=1)
+    if [[ "$engine" == "podman" ]]; then
+        run_args+=(--userns=keep-id)
+    else
+        run_args+=(--user "$(id -u):$(id -g)")
+    fi
+
+    forward=(--arch "$arch")
+    ((skip_build)) && forward+=(--skip-build)
+    ((keep_appdir)) && forward+=(--keep-appdir)
+
+    log "Building the $arch AppImage inside $image"
+    "$engine" run "${run_args[@]}" "$image" ./scripts/build_appimage.sh "${forward[@]}"
+    exit
+fi
 
 # --- inputs ----------------------------------------------------------------
 
-binary="$root/build/sticky-notes"
+binary="$root/build-appimage-$arch/sticky-notes"
 desktop="$root/scripts/sticky-notes.desktop"
 icon="$root/resources/icons/sticky-notes.png"
 
 for f in "$desktop" "$icon"; do
     [[ -f "$f" ]] || { echo "Missing required file: $f" >&2; exit 1; }
 done
-
-arch="$(uname -m)"
-case "$arch" in
-    x86_64|aarch64) ;;
-    *) echo "Unsupported architecture: $arch (need x86_64 or aarch64)" >&2; exit 1 ;;
-esac
 
 # --- 1. Release binary -----------------------------------------------------
 
@@ -78,8 +156,8 @@ if ((skip_build)); then
     log "Reusing $binary"
 else
     log "Configuring and building (Release)"
-    cmake -S "$root" -B "$root/build" -G Ninja -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$root/build"
+    cmake -S "$root" -B "$root/build-appimage-$arch" -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$root/build-appimage-$arch"
 fi
 
 # Version is read from the binary; fall back to CMakeLists.txt because
@@ -89,7 +167,7 @@ if [[ -z "$version" ]]; then
     version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMakeLists.txt" | head -1)"
 fi
 [[ -n "$version" ]] || { echo "Could not determine the version" >&2; exit 1; }
-log "Version: $version"
+log "Version: $version ($arch)"
 
 # --- 2. Tools (linuxdeploy + Qt plugin, appimagetool, runtime) -------------
 
@@ -144,6 +222,14 @@ cp "$icon"    "$appdir/usr/share/icons/hicolor/256x256/apps/"
 if [[ -z "${QMAKE:-}" ]]; then
     QMAKE="$(command -v qmake6 || command -v qmake || true)"
 fi
+# Ubuntu and other distributions keep qmake6 out of PATH when only the -dev
+# packages are installed (the container build hits this).
+if [[ -z "$QMAKE" ]]; then
+    for candidate in /usr/lib/qt6/bin/qmake6 /usr/lib64/qt6/bin/qmake6 \
+                     /usr/lib/qt6/bin/qmake /usr/lib64/qt6/bin/qmake; do
+        [[ -x "$candidate" ]] && { QMAKE="$candidate"; break; }
+    done
+fi
 [[ -n "$QMAKE" ]] || { echo "qmake6 not found; install qt6-base-devel or set QMAKE" >&2; exit 1; }
 
 export ARCH="$arch"
@@ -152,8 +238,14 @@ export QMAKE
 # plugin defaults to the X11 plugin only, which would make the app unlaunchable.
 export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
 # Pull in KDEPlasmaPlatformTheme6.so + breeze6.so, otherwise the AppImage looks
-# light/Fusion even on a dark Plasma desktop.
-export DEPLOY_PLATFORM_THEMES=1
+# light/Fusion even on a dark Plasma desktop. The aarch64 build container may
+# not have the theme (it is optional there), so only enable the deployment when
+# the plugin is actually present.
+if find /usr -name KDEPlasmaPlatformTheme6.so -print -quit 2>/dev/null | grep -q .; then
+    export DEPLOY_PLATFORM_THEMES=1
+else
+    log "No KDE platform theme plugin found: the AppImage will use the Qt default style"
+fi
 # Without FUSE the AppImage tools cannot self-mount; extract and run instead.
 if [[ ! -e /dev/fuse ]] && ! command -v fusermount >/dev/null 2>&1 \
         && ! command -v fusermount3 >/dev/null 2>&1; then

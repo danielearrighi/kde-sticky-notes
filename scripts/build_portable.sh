@@ -10,17 +10,23 @@
 #
 # This script builds inside scripts/container/ubuntu26.04.Dockerfile
 # (Qt 6.10, LayerShellQt 6.6: the oldest versions the app supports) and writes
-# build-release/sticky-notes. The image is built once and cached.
+# build-release-<arch>/sticky-notes. The image is built once and cached.
+#
+# --arch selects the target: the default is the host architecture. A foreign
+# architecture is emulated with QEMU user mode (binfmt_misc), so an x86_64 host
+# can produce the aarch64 tarball binary; the image is built per architecture.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
 root="$(cd "$here/.." && pwd)"                                 # repository root
 
-image="${STICKY_NOTES_BUILD_IMAGE:-sticky-notes-build:ubuntu26.04}"
-dockerfile="$here/container/ubuntu26.04.Dockerfile"
-build_dir="$root/build-release"
-binary="$build_dir/sticky-notes"
+# shellcheck source=lib/arch.sh
+source "$here/lib/arch.sh"
 
+dockerfile="$here/container/ubuntu26.04.Dockerfile"
+image_base="${STICKY_NOTES_BUILD_IMAGE:-sticky-notes-build:ubuntu26.04}"
+
+arch=""
 engine=""
 skip_build=0
 rebuild_image=0
@@ -29,27 +35,31 @@ usage() {
     cat <<'EOF'
 Usage: scripts/build_portable.sh [options]
 
-Builds build-release/sticky-notes against Qt 6.10 + LayerShellQt 6.6 in a
+Builds build-release-<arch>/sticky-notes against Qt 6.10 + LayerShellQt 6.6 in a
 container (Ubuntu 26.04), so the release tarball also runs on distributions
 with a newer Qt than the build machine.
 
 Options:
+  --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).
+                   A foreign architecture needs QEMU user mode (binfmt_misc)
   --engine NAME    container engine to use (podman or docker; default: auto)
-  --image IMAGE    build image tag (default: sticky-notes-build:ubuntu26.04)
+  --image TAG      base build image tag (default: sticky-notes-build:ubuntu26.04;
+                   the architecture is appended, so each arch has its own image)
   --rebuild-image  rebuild the image from scratch (--no-cache)
-  --skip-build     do not build, only check build-release/sticky-notes exists
+  --skip-build     do not build, only check build-release-<arch>/sticky-notes
   -h, --help       show this help
 
 Environment:
-  CONTAINER_ENGINE        same as --engine
+  CONTAINER_ENGINE          same as --engine
   STICKY_NOTES_BUILD_IMAGE  same as --image
 EOF
 }
 
 while (($#)); do
     case "$1" in
+        --arch)          arch="${2:?--arch needs an architecture}"; shift ;;
         --engine)        engine="${2:?--engine needs a name}"; shift ;;
-        --image)         image="${2:?--image needs a tag}"; shift ;;
+        --image)         image_base="${2:?--image needs a tag}"; shift ;;
         --rebuild-image) rebuild_image=1 ;;
         --skip-build)    skip_build=1 ;;
         -h|--help)       usage; exit 0 ;;
@@ -61,13 +71,27 @@ done
 log() { printf '[build_portable] %s\n' "$*"; }
 die() { printf 'build_portable: %s\n' "$*" >&2; exit 1; }
 
+arch="${arch:-$(sn_host_arch)}"
+sn_known_arch "$arch" || die "Unsupported architecture: $arch (need x86_64 or aarch64)"
+
+platform="$(sn_platform "$arch")"
+image="$image_base-$arch"
+build_dir_name="build-release-$arch"
+build_dir="$root/$build_dir_name"
+binary="$build_dir/sticky-notes"
+
 if ((skip_build)); then
     [[ -x "$binary" ]] || die "Binary not found: $binary (drop --skip-build)"
-    log "Reusing $binary"
+    log "Reusing $binary ($arch)"
     exit 0
 fi
 
 [[ -f "$dockerfile" ]] || die "Missing $dockerfile"
+
+# A foreign architecture runs the container's toolchain through QEMU.
+sn_require_binfmt "$arch"
+platform_args=()
+sn_is_native "$arch" || platform_args=(--platform "$platform")
 
 # --- container engine -------------------------------------------------------
 
@@ -90,10 +114,10 @@ log "Container engine: $engine"
 
 if ((rebuild_image)); then
     log "Rebuilding $image from scratch"
-    "$engine" build --no-cache -t "$image" -f "$dockerfile" "$here/container"
+    "$engine" build --no-cache "${platform_args[@]}" -t "$image" -f "$dockerfile" "$here/container"
 elif ! "$engine" image inspect "$image" >/dev/null 2>&1; then
     log "Building $image (first run only)"
-    "$engine" build -t "$image" -f "$dockerfile" "$here/container"
+    "$engine" build "${platform_args[@]}" -t "$image" -f "$dockerfile" "$here/container"
 else
     log "Reusing image $image"
 fi
@@ -104,28 +128,28 @@ mkdir -p "$build_dir"
 if [[ ! -w "$build_dir" ]]; then
     # A previous rootful docker run can leave the directory owned by root.
     log "Fixing ownership of $build_dir"
-    "$engine" run --rm -v "$root:/work:Z" -w /work "$image" \
-        chown -R "$(id -u):$(id -g)" build-release
+    "$engine" run --rm "${platform_args[@]}" -v "$root:/work:Z" -w /work "$image" \
+        chown -R "$(id -u):$(id -g)" "$build_dir_name"
 fi
 
 # Run as the invoking user so the build tree is not left owned by root. podman
 # needs keep-id (its default rootless mapping would turn the host user into a
 # subuid); docker (rootful) just needs --user.
-run_args=(--rm -v "$root:/work:Z" -w /work -e HOME=/tmp)
+run_args=(--rm "${platform_args[@]}" -v "$root:/work:Z" -w /work -e HOME=/tmp)
 if [[ "$engine" == "podman" ]]; then
     run_args+=(--userns=keep-id)
 else
     run_args+=(--user "$(id -u):$(id -g)")
 fi
 
-log "Building in $image"
+log "Building $arch in $image"
 "$engine" run "${run_args[@]}" "$image" bash -lc \
-    'cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-release'
+    "cmake -S . -B $build_dir_name -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build $build_dir_name"
 
 [[ -x "$binary" ]] || die "Build did not produce $binary"
 
 required_qt="$(readelf -V "$binary" 2>/dev/null | grep -o 'Qt_6\.[0-9][0-9]*' | sort -Vu | tail -1 || true)"
-log "Built $binary"
+log "Built $binary ($arch)"
 if [[ -n "$required_qt" ]]; then
     log "Requires Qt ${required_qt#Qt_} or newer"
     # Tripwire: the whole point of this script is the Qt 6.10 baseline. If the

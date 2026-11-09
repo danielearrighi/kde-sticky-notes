@@ -67,8 +67,9 @@ modules:
           - .git
           - .vscode
           - build
-          - build-release
-          - build-flatpak
+          - build-release*
+          - build-appimage*
+          - build-flatpak*
           - release
           - docs
           - screens

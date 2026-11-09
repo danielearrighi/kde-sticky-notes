@@ -14,11 +14,19 @@
 # pedantry: Qt is only forward compatible, and a binary built on the rolling
 # host (Qt 6.12) fails on Fedora (Qt 6.11) with "version `Qt_6.12' not found".
 # Use --native only for a local test build.
+#
+# --arch selects the target architecture (default: the host one). A foreign
+# architecture goes through scripts/build_portable.sh, which emulates it with
+# QEMU; the archive is then named sticky-notes-<version>-<arch>.tar.gz.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
 root="$(cd "$here/.." && pwd)"                                 # repository root
 
+# shellcheck source=lib/arch.sh
+source "$here/lib/arch.sh"
+
+arch=""
 skip_build=0
 clean_only=0
 native_build=0
@@ -29,9 +37,11 @@ usage() {
 Usage: scripts/build_release.sh [options]
 
 Options:
+  --arch ARCH    target architecture: x86_64 or aarch64 (default: uname -m)
   --binary PATH  reuse an existing binary (implies --skip-build)
   --native       build on the host (build/sticky-notes) instead of the
-                 container; the resulting tarball may require a newer Qt
+                 container; only for the host architecture, and the resulting
+                 tarball may require a newer Qt
   --skip-build   do not build, reuse the selected binary
   --clean        remove release/, then exit
   -h, --help     show this help
@@ -40,6 +50,7 @@ EOF
 
 while (($#)); do
     case "$1" in
+        --arch)       arch="${2:?--arch needs an architecture}"; shift ;;
         --binary)     binary_override="${2:?--binary needs a path}"; shift ;;
         --native)     native_build=1 ;;
         --skip-build) skip_build=1 ;;
@@ -70,11 +81,8 @@ for f in "$desktop" "$icon" "$installer"; do
     [[ -f "$f" ]] || { echo "Missing required file: $f" >&2; exit 1; }
 done
 
-arch="$(uname -m)"
-case "$arch" in
-    x86_64|aarch64) ;;
-    *) echo "Unsupported architecture: $arch (need x86_64 or aarch64)" >&2; exit 1 ;;
-esac
+arch="${arch:-$(sn_host_arch)}"
+sn_known_arch "$arch" || { echo "Unsupported architecture: $arch (need x86_64 or aarch64)" >&2; exit 1; }
 
 # --- 1. Release binary -----------------------------------------------------
 
@@ -83,6 +91,10 @@ if [[ -n "$binary_override" ]]; then
     [[ -x "$binary" ]] || { echo "Binary not found: $binary" >&2; exit 1; }
     log "Using $binary"
 elif ((native_build)); then
+    sn_is_native "$arch" || {
+        echo "--native builds on this host only; use the container for $arch" >&2
+        exit 1
+    }
     # Host build: convenient for a quick local test, but the tarball inherits
     # the host Qt and may not start on distributions with an older Qt.
     binary="$root/build/sticky-notes"
@@ -96,18 +108,30 @@ elif ((native_build)); then
     fi
 else
     # Portable build against Qt 6.10 + LayerShellQt 6.6 (see build_portable.sh).
-    binary="$root/build-release/sticky-notes"
-    if ((skip_build)); then
-        "$root/scripts/build_portable.sh" --skip-build
-    else
-        "$root/scripts/build_portable.sh"
-    fi
+    binary="$root/build-release-$arch/sticky-notes"
+    portable_args=(--arch "$arch")
+    ((skip_build)) && portable_args+=(--skip-build)
+    "$root/scripts/build_portable.sh" "${portable_args[@]}"
     log "Using $binary"
 fi
 
+# Guard against a --binary (or a leftover build tree) of the other
+# architecture: the tarball name would silently lie.
+if command -v readelf >/dev/null 2>&1; then
+    binary_arch="$(LC_ALL=C readelf -h "$binary" 2>/dev/null | sed -n 's/^ *Machine: *//p' | head -1)"
+    case "$arch:$binary_arch" in
+        x86_64:*X86-64*|aarch64:*AArch64*) ;;
+        *) echo "$binary is not a $arch binary (readelf: ${binary_arch:-unknown})" >&2; exit 1 ;;
+    esac
+fi
+
 # Version is read from the binary; fall back to CMakeLists.txt because
-# `--version` still constructs a QApplication and thus needs a working display.
-version="$("$binary" --version 2>/dev/null | awk '{print $2}' || true)"
+# `--version` still constructs a QApplication and thus needs a working display,
+# and a foreign binary cannot be executed without QEMU.
+version=""
+if sn_is_native "$arch"; then
+    version="$("$binary" --version 2>/dev/null | awk '{print $2}' || true)"
+fi
 if [[ -z "$version" ]]; then
     version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMakeLists.txt" | head -1)"
 fi

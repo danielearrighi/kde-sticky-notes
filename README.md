@@ -6,14 +6,15 @@ Desktop sticky notes for **KDE Plasma (Wayland)**.
 ## Try it!
 
 Download the latest release from the [Releases page](https://github.com/danielearrighi/kde-sticky-notes/releases).
-There are three ways to try it.
+There are three ways to try it. Every artifact is published for **x86_64** and
+**aarch64**: in the file names below `<arch>` is the one matching `uname -m`.
 
 **Flatpak** (bundles Qt 6.10 and LayerShellQt in the `org.kde.Platform`
 runtime, so it does not depend on the distribution or on the Qt version
-installed): download `sticky-notes-<version>-x86_64.flatpak` and install it:
+installed): download `sticky-notes-<version>-<arch>.flatpak` and install it:
 
 ```bash
-flatpak install --user ./sticky-notes-<version>-x86_64.flatpak
+flatpak install --user ./sticky-notes-<version>-<arch>.flatpak
 flatpak run io.github.danielearrighi.StickyNotes
 ```
 
@@ -23,24 +24,24 @@ installed from a repository (for example Flathub) update it with
 `.flatpak` use the newer file:
 
 ```bash
-flatpak install --user --reinstall ./sticky-notes-<new-version>-x86_64.flatpak
+flatpak install --user --reinstall ./sticky-notes-<new-version>-<arch>.flatpak
 ```
 
 **AppImage** (self-contained, bundles Qt6 and LayerShellQt — nothing to build):
-download `sticky-notes-<version>-x86_64.AppImage`, make it executable and run it:
+download `sticky-notes-<version>-<arch>.AppImage`, make it executable and run it:
 
 ```bash
-chmod +x sticky-notes-<version>-x86_64.AppImage
-./sticky-notes-<version>-x86_64.AppImage
+chmod +x sticky-notes-<version>-<arch>.AppImage
+./sticky-notes-<version>-<arch>.AppImage
 ```
 or 
 
 **tar.gz** (plain binary release — installs it in your session, so it shows up
-in the KDE menu and the taskbar): download `sticky-notes-<version>-x86_64.tar.gz`, extract it and run the bundled installer:
+in the KDE menu and the taskbar): download `sticky-notes-<version>-<arch>.tar.gz`, extract it and run the bundled installer:
 
 ```bash
-tar -xzf sticky-notes-<version>-x86_64.tar.gz
-cd sticky-notes-<version>-x86_64
+tar -xzf sticky-notes-<version>-<arch>.tar.gz
+cd sticky-notes-<version>-<arch>
 ./install.sh
 ```
 
@@ -88,6 +89,28 @@ flatpak install flathub org.kde.Sdk//6.10
 
 `flatpak-builder` is needed; if it is missing, the script uses the
 `org.flatpak.Builder` Flatpak app (`flatpak install flathub org.flatpak.Builder`).
+
+### Other architectures (aarch64)
+
+Every build script accepts `--arch x86_64|aarch64` (default: the host one), the
+artifacts are named `release/sticky-notes-<version>-<arch>.*`, and
+`scripts/build_all.sh` builds both architectures and all three artifacts in one
+go:
+
+```bash
+./scripts/build_all.sh                  # x86_64 + aarch64, tarball + AppImage + Flatpak
+./scripts/build_all.sh --archs x86_64   # host architecture only
+```
+
+Building for the architecture you are not running needs QEMU user emulation
+(`qemu-linux-user` on openSUSE, `qemu-user-static` on Fedora/Debian/Ubuntu), and
+the Flatpak bundle needs the SDK of that architecture
+(`flatpak install --arch=aarch64 flathub org.kde.Sdk//6.10`). The tarball and
+the AppImage are built in `scripts/container/ubuntu26.04.Dockerfile`, with one
+container image per architecture; a native aarch64 machine needs nothing
+special. The aarch64 AppImage is built against the container's Qt 6.10 instead
+of the host Qt, because linuxdeploy, its Qt plugin and appimagetool only run on
+the architecture they package.
 
 
 ## Install

@@ -23,13 +23,28 @@ cmake --build build
 
 ## Release builds
 
+Every build script takes `--arch x86_64|aarch64` (default `uname -m`) and
+`scripts/build_all.sh` builds **both** (host architecture first, override with
+`--archs`). Release artifacts are therefore six:
+`release/sticky-notes-<version>-<arch>.{tar.gz,AppImage,flatpak}`. A "foreign"
+architecture (not the host one) is emulated with QEMU user mode, so it needs a
+`binfmt_misc` entry: `qemu-linux-user` on openSUSE, `qemu-user-static` on
+Fedora/Debian/Ubuntu. Each container image and each Flatpak SDK is per
+architecture: `sticky-notes-build:ubuntu26.04-<arch>` and
+`org.kde.Sdk//6.10` installed with `--arch`.
+
 - `scripts/build_release.sh` builds the tarball binary with
   `scripts/build_portable.sh` inside `scripts/container/ubuntu26.04.Dockerfile`
-  (Qt 6.10, LayerShellQt 6.6) and writes `build-release/sticky-notes`. That
-  baseline is not cosmetic: the tarball does not bundle Qt, and Qt is forward
-  compatible only. A binary built on the rolling host (Qt 6.12) fails on
-  Fedora 44 (Qt 6.11.2) with `version 'Qt_6.12' not found`. `--native` exists
-  for local testing only; never publish a tarball built that way.
+  (Qt 6.10, LayerShellQt 6.6) and writes
+  `build-release-<arch>/sticky-notes`. That baseline is not cosmetic: the
+  tarball does not bundle Qt, and Qt is forward compatible only. A binary built
+  on the rolling host (Qt 6.12) fails on Fedora 44 (Qt 6.11.2) with
+  `version 'Qt_6.12' not found`. `--native` exists for local testing only (host
+  architecture only); never publish a tarball built that way.
+- `scripts/build_portable.sh` gets the architecture from `--arch`, tags the
+  container image with it and passes `--platform` (`linux/amd64`,
+  `linux/arm64`) only for a foreign architecture. The Qt 6.10 tripwire at the
+  end reads the ELF symbols with `readelf`, which works on a foreign binary.
 - `scripts/build_flatpak.sh` builds
   `release/sticky-notes-<version>-<arch>.flatpak` from
   `packaging/io.github.danielearrighi.StickyNotes.yml` against
@@ -37,18 +52,32 @@ cmake --build build
   **LayerShellQt 6.6 from source** because `org.kde.Platform` does not ship it.
   The runtime is a Flatpak dependency (downloaded on install), so the host Qt
   is irrelevant: the same bundle runs on Fedora 44, Ubuntu, Debian, etc. The
-  build needs `org.kde.Sdk//6.10`; if `flatpak-builder` is not installed the
-  script falls back to `flatpak run --command=flatpak-builder org.flatpak.Builder`
+  build needs `org.kde.Sdk//6.10` **for the target architecture**
+  (`flatpak install --arch=aarch64 flathub org.kde.Sdk//6.10`); if
+  `flatpak-builder` is not installed the script falls back to
+  `flatpak run --command=flatpak-builder org.flatpak.Builder`
   (with `FLATPAK_USER_DIR` pointed at the real user installation, otherwise the
-  host flatpak looks for the SDK in the Builder's own `~/.var/app` data).
+  host flatpak looks for the SDK in the Builder's own `~/.var/app` data). The
+  build tree is `build-flatpak-<arch>/` and `--install` only applies to the
+  host architecture.
 - `scripts/build_all.sh` is a convenience wrapper that runs the three builds
-  above in order (tarball, AppImage, Flatpak) and prints a summary with the
-  artifact sizes. It only forwards options (`--native`, `--skip-build`,
-  `--install`, `--keep-appdir`) and can select targets with `--only`/`--skip`;
-  each script stays the one to use for a single artifact and keeps its own
-  requirements.
-- `scripts/build_appimage.sh` still builds `build/sticky-notes` on the host:
-  the AppImage bundles Qt and the loader, so the build Qt does not matter.
+  above in order (tarball, AppImage, Flatpak) for every architecture and prints
+  a summary with the artifact sizes. It only forwards options (`--native`,
+  `--skip-build`, `--install`, `--keep-appdir`) and can select targets with
+  `--only`/`--skip` and architectures with `--archs`; with no options it builds
+  x86_64 + aarch64, so QEMU must be available. Each script stays the one to use
+  for a single artifact and keeps its own requirements.
+- `scripts/build_appimage.sh` builds the host-architecture AppImage on the host
+  in `build-appimage-<arch>/` with the host Qt (the AppImage bundles Qt and the
+  loader, so the build Qt does not matter). linuxdeploy, the Qt plugin and
+  appimagetool are architecture-specific binaries that must run next to the Qt
+  they deploy, so a foreign architecture rebuilds the script inside the
+  emulated aarch64 container (`APPIMAGE_EXTRACT_AND_RUN=1`, no FUSE inside).
+  That AppImage is therefore built against Ubuntu's Qt 6.10/glibc instead of
+  the host Qt 6.12: the x86_64 and aarch64 AppImages do not share a baseline.
+  The KDE platform theme deployment is skipped when the environment has no
+  `KDEPlasmaPlatformTheme6.so` (the container installs it when the package is
+  available), so an aarch64 AppImage may fall back to the Qt default style.
 - The tarball `install.sh` (`scripts/install-release.sh`) distinguishes a
   missing library from a too-old one (`ldd` prints `version '…' not found`):
   the latter cannot be fixed by installing packages, so it refuses to install
@@ -188,9 +217,12 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   against `SHA256SUMS`, the old one is renamed to `<target>.old` and removed on
   the next start. Development builds and `/usr/bin` packages are reported as
   unsupported (not writable): never attempt a self-update there.
-- `scripts/create_release.sh` must upload `SHA256SUMS` and the `.flatpak` with
-  every release: the updater refuses to install an asset whose hash cannot be
-  verified, and the Flatpak asset is one of the three supported installations.
+- `scripts/create_release.sh` uploads every artifact found in `release/` for
+  both architectures plus one `SHA256SUMS` with every release: the updater
+  refuses to install an asset whose hash cannot be verified (it looks the file
+  up by name, so a single checksum file covers all architectures), and the
+  Flatpak asset is one of the three supported installations. A missing
+  architecture is a warning, not an error.
 - The Flatpak `metainfo.xml` under `packaging/` carries its own `<releases>`
   entry: bump it together with `project(... VERSION)` in `CMakeLists.txt`.
 - **The AppImage bundles the C library** (`scripts/build_appimage.sh`): it is
