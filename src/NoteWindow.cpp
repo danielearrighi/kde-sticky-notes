@@ -53,6 +53,7 @@
 #include <QTextImageFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextDocumentFragment>
 
 #include <functional>
 
@@ -418,6 +419,15 @@ void applyCodeBackgrounds(QTextDocument *doc, const QColor &color)
     c.endEditBlock();
 }
 
+/// Private clipboard flavour carrying a note selection as Markdown. QTextEdit
+/// puts HTML and plain text on the clipboard, and its HTML flavour has no
+/// concept of a fenced code block: pasted back into another note the block
+/// becomes a monospace paragraph (so it wraps again) and the next save writes
+/// it as inline code. Notes exchange this flavour instead, which round-trips
+/// the fences, lists and headings; the HTML and plain text entries stay there
+/// for the other applications.
+constexpr auto kNoteMarkdownMime = "application/x-sticky-notes-markdown";
+
 /// QTextEdit that turns a pasted/dropped image into a note image: the handler
 /// installed by NoteWindow stores it inside the document (see
 /// NoteWindow::insertImage()). It also recognizes URLs typed or pasted in the
@@ -448,6 +458,14 @@ public:
         m_plainPasteHandler = std::move(handler);
     }
 
+    /// Handler for a selection pasted from another note: it receives the
+    /// Markdown the copy put on the clipboard (see kNoteMarkdownMime) and
+    /// inserts it, so the code block fences survive.
+    void setMarkdownPasteHandler(std::function<void(const QString &)> handler)
+    {
+        m_markdownPasteHandler = std::move(handler);
+    }
+
     /// Enables the automatic recognition of URLs typed or pasted in the body.
     /// It is off while the note is loaded from Markdown: QTextDocument already
     /// creates the anchors there, and modifying the document during the import
@@ -455,6 +473,19 @@ public:
     void setLinkifyEnabled(bool enabled) { m_linkifyEnabled = enabled; }
 
 protected:
+    /// Adds the Markdown flavour to what Ctrl+C / the context menu put on the
+    /// clipboard, next to the HTML and plain text QTextEdit already provides.
+    QMimeData *createMimeDataFromSelection() const override
+    {
+        QMimeData *mime = QTextEdit::createMimeDataFromSelection();
+        const QTextCursor selection = textCursor();
+        if (mime && selection.hasSelection()) {
+            mime->setData(QString::fromLatin1(kNoteMarkdownMime),
+                          QTextDocumentFragment(selection).toMarkdown().toUtf8());
+        }
+        return mime;
+    }
+
     void keyPressEvent(QKeyEvent *event) override
     {
         // Ctrl+Shift+V: paste without formatting. Handled here (and not as a
@@ -519,6 +550,16 @@ protected:
 
     void insertFromMimeData(const QMimeData *source) override
     {
+        // A selection copied from a note carries the Markdown flavour: import
+        // that instead of the HTML one, which would flatten a fenced code block
+        // into a monospace paragraph (see kNoteMarkdownMime).
+        if (source && m_markdownPasteHandler
+            && source->hasFormat(QString::fromLatin1(kNoteMarkdownMime))) {
+            m_markdownPasteHandler(
+                QString::fromUtf8(source->data(QString::fromLatin1(kNoteMarkdownMime))));
+            return;
+        }
+
         if (source && m_imageHandler) {
             // An image on the clipboard (a screenshot, or a copy from any
             // application).
@@ -755,6 +796,7 @@ private:
 
     std::function<bool(const QImage &)> m_imageHandler;
     std::function<void()> m_plainPasteHandler;
+    std::function<void(const QString &)> m_markdownPasteHandler;
     bool m_linkifyEnabled = false;
     bool m_linkifying = false;
     bool m_linkPressed = false;
@@ -1042,6 +1084,12 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
     m_body = noteBody;
     noteBody->setImageHandler([this](const QImage &image) { return insertImage(image); });
     noteBody->setPlainPasteHandler([this] { pastePlainText(); });
+    noteBody->setMarkdownPasteHandler([this](const QString &markdown) {
+        m_body->textCursor().insertMarkdown(markdown);
+        // Markdown carries no background: paint the code block background now,
+        // as applyStyle() does after loading a note.
+        applyCodeBackgrounds(m_body->document(), codeBackgroundColor(m_theme.body));
+    });
     m_body->setObjectName(QStringLiteral("body"));
     m_body->setFrameShape(QFrame::NoFrame);
     m_body->setAcceptRichText(true);
@@ -1623,7 +1671,14 @@ void NoteWindow::applyStyle()
                       "#body QScrollBar::add-line:horizontal, #body QScrollBar::sub-line:horizontal {"
                       " width: 0; background: none; }"
                       "#body QScrollBar::add-page:horizontal, #body QScrollBar::sub-page:horizontal {"
-                      " background: none; }")
+                      " background: none; }"
+                      // The corner between the two scrollbars is a sub-control of
+                      // the scroll area, painted by PE_PanelScrollAreaCorner only
+                      // while both bars are visible (a fenced code block does not
+                      // wrap, so it turns the horizontal bar on). Without a rule
+                      // for it the platform style fills the 5x5 square with the
+                      // palette's base colour: a black box under the vertical bar.
+                      "#body::corner { background: %1; }")
                       .arg(m_theme.body, m_theme.titleBar, m_theme.text,
                            QString::number(kResizeGrip), QString::number(kBodyPadding)));
 
