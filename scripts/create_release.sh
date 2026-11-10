@@ -3,13 +3,14 @@
 #
 # Release flow:
 #   1. bump project(... VERSION) in CMakeLists.txt, commit (and push)
-#   2. scripts/build_all.sh (or the three build scripts one by one)
+#   2. scripts/build_all.sh (or the individual build scripts one by one)
 #   3. scripts/create_release.sh
 #
 # The script reads the version from CMakeLists.txt, collects the artifacts of
 # every supported architecture that are present in release/
 # (sticky-notes-<version>-<arch>.AppImage, .tar.gz and .flatpak for x86_64 and
-# aarch64), asks for the release notes (multi-line Markdown in $EDITOR),
+# aarch64, plus the x86_64-only .deb and .rpm), asks for the release notes
+# (multi-line Markdown in $EDITOR),
 # creates the tag on the remote at HEAD and uploads the files plus SHA256SUMS
 # (which the app checks before installing an update). Missing architectures are
 # a warning, not an error: a release can ship what was built. It never commits
@@ -18,6 +19,9 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
 root="$(cd "$here/.." && pwd)"                                 # repository root
+
+# shellcheck source=lib/arch.sh
+source "$here/lib/arch.sh"
 
 dry_run=0
 assume_yes=0
@@ -29,7 +33,8 @@ Usage: scripts/create_release.sh [options]
 
 Creates the GitHub release for the version in CMakeLists.txt, uploading every
 artifact found in release/ (sticky-notes-<version>-<arch>.AppImage, .tar.gz and
-.flatpak for x86_64 and aarch64) plus SHA256SUMS.
+.flatpak for x86_64 and aarch64, plus the x86_64-only .deb and .rpm) and one
+SHA256SUMS.
 
 Options:
   -y, --yes              do not ask for confirmation
@@ -95,11 +100,16 @@ for arch in "${archs[@]}"; do
     add_asset "$root/release/sticky-notes-$version-$arch.AppImage"
     add_asset "$root/release/sticky-notes-$version-$arch.tar.gz"
     add_asset "$root/release/sticky-notes-$version-$arch.flatpak"
+    # The distribution packages are x86_64 only.
+    if [[ "$arch" == x86_64 ]]; then
+        add_asset "$root/release/sticky-notes_${version}-1_$(sn_deb_arch "$arch").deb"
+        add_asset "$root/release/sticky-notes-${version}-1.$(sn_rpm_arch "$arch").rpm"
+    fi
 done
 
 ((${#assets[@]})) \
     || die "No release artifacts for $version in $root/release
-Run scripts/build_all.sh (or the three build scripts) first."
+Run scripts/build_all.sh (or the build scripts) first."
 
 if ((${#missing[@]})); then
     log "Not built, not uploaded: ${missing[*]}"

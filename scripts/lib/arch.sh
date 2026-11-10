@@ -47,6 +47,35 @@ sn_platform() {
     esac
 }
 
+# Debian architecture name, as used by dpkg and in the .deb file name.
+sn_deb_arch() {
+    case "$1" in
+        x86_64)  printf 'amd64\n' ;;
+        aarch64) printf 'arm64\n' ;;
+        *) sn_die "Unsupported architecture: $1 (need x86_64 or aarch64)" ;;
+    esac
+}
+
+# RPM architecture name (same as the ELF/uname name).
+sn_rpm_arch() {
+    sn_known_arch "$1" || sn_die "Unsupported architecture: $1 (need x86_64 or aarch64)"
+    printf '%s\n' "$1"
+}
+
+# Exit unless the ELF file $1 is built for architecture $2. Guards against a
+# --binary (or a leftover build tree) of the other architecture: the package
+# name would silently lie.
+sn_verify_binary_arch() {
+    local binary="$1" arch="$2" machine
+    command -v readelf >/dev/null 2>&1 || return 0
+    machine="$(LC_ALL=C readelf -h "$binary" 2>/dev/null \
+        | sed -n 's/^ *Machine: *//p' | head -1)"
+    case "$arch:$machine" in
+        x86_64:*X86-64*|aarch64:*AArch64*) return 0 ;;
+        *) sn_die "$binary is not a $arch binary (readelf: ${machine:-unknown})" ;;
+    esac
+}
+
 sn_binfmt_ok() {
     [[ -e "/proc/sys/fs/binfmt_misc/qemu-$1" \
        || -e "/proc/sys/fs/binfmt_misc/qemu-$1-static" ]]

@@ -25,13 +25,21 @@ cmake --build build
 
 Every build script takes `--arch x86_64|aarch64` (default `uname -m`) and
 `scripts/build_all.sh` builds **both** (host architecture first, override with
-`--archs`). Release artifacts are therefore six:
-`release/sticky-notes-<version>-<arch>.{tar.gz,AppImage,flatpak}`. A "foreign"
-architecture (not the host one) is emulated with QEMU user mode, so it needs a
-`binfmt_misc` entry: `qemu-linux-user` on openSUSE, `qemu-user-static` on
-Fedora/Debian/Ubuntu. Each container image and each Flatpak SDK is per
-architecture: `sticky-notes-build:ubuntu26.04-<arch>` and
-`org.kde.Sdk//6.10` installed with `--arch`.
+`--archs`). Release artifacts are therefore eight:
+
+- `release/sticky-notes-<version>-<arch>.{tar.gz,AppImage,flatpak}` for x86_64
+  and aarch64;
+- `release/sticky-notes_<version>-1_amd64.deb` and
+  `release/sticky-notes-<version>-1.x86_64.rpm` for **x86_64 only** (the
+  Debian/RPM packages use the standard file naming, not the `<arch>` suffix of
+  the other artifacts).
+
+A "foreign" architecture (not the host one) is emulated with QEMU user mode, so
+it needs a `binfmt_misc` entry: `qemu-linux-user` on openSUSE,
+`qemu-user-static` on Fedora/Debian/Ubuntu. Each container image and each Flatpak
+SDK is per architecture: `sticky-notes-build:ubuntu26.04-<arch>`,
+`sticky-notes-rpmbuild:fedora44-<arch>` and `org.kde.Sdk//6.10` installed with
+`--arch`.
 
 - `scripts/build_release.sh` builds the tarball binary with
   `scripts/build_portable.sh` inside `scripts/container/ubuntu26.04.Dockerfile`
@@ -60,13 +68,38 @@ architecture: `sticky-notes-build:ubuntu26.04-<arch>` and
   host flatpak looks for the SDK in the Builder's own `~/.var/app` data). The
   build tree is `build-flatpak-<arch>/` and `--install` only applies to the
   host architecture.
-- `scripts/build_all.sh` is a convenience wrapper that runs the three builds
-  above in order (tarball, AppImage, Flatpak) for every architecture and prints
-  a summary with the artifact sizes. It only forwards options (`--native`,
-  `--skip-build`, `--install`, `--keep-appdir`) and can select targets with
-  `--only`/`--skip` and architectures with `--archs`; with no options it builds
-  x86_64 + aarch64, so QEMU must be available. Each script stays the one to use
-  for a single artifact and keeps its own requirements.
+- `scripts/build_deb.sh` packages the portable binary into
+  `release/sticky-notes_<version>-1_<debarch>.deb` inside the Ubuntu 26.04 image
+  (`amd64` for x86_64). `dpkg-shlibdeps` generates the versioned dependencies
+  from the binary's ELF symbols (Qt 6.10, LayerShellQt 6.6) and the script adds
+  `qt6-wayland` and `libqt6sql6-sqlite`: the QPA and SQLite plugins are loaded
+  at runtime, so shlibdeps cannot see them. The package installs the binary, the
+  desktop entry, every hicolor icon size, the metainfo (launchable patched to
+  `sticky-notes.desktop`) and Debian copyright/changelog files. It targets
+  Ubuntu 26.04+ and Debian forky/sid+; an older Qt is refused by the versioned
+  dependency instead of being installed and failing at startup.
+- `scripts/build_rpm.sh` builds `release/sticky-notes-<version>-1.<rpmarch>.rpm`
+  with `rpmbuild` inside `scripts/container/fedora44.Dockerfile`. There is no
+  compilation: the portable binary is staged into a source tarball and
+  `packaging/sticky-notes.spec` only installs the files. Fedora and openSUSE
+  naming differences are covered by rich dependencies
+  (`(qt6-qtbase >= 6.10 or libQt6Core6 >= 6.10)`,
+  `(layer-shell-qt >= 6.6 or layer-shell-qt6 >= 6.6)` and
+  `(qt6-sql-sqlite or qt6-qtbase)` for the QSQLITE driver); the rest, including
+  the `Qt_6.10` symbol requirement, comes from rpm's automatic ELF dependency
+  generator. Do not turn the SQLite dependency into the plugin file path:
+  dnf/zypper do not always load the filelists metadata and the install then
+  fails with "nothing provides *.so". `%global __os_install_post %{nil}` skips
+  the brp strip/debuginfo steps (the binary is already built and may belong to
+  the foreign architecture).
+- `scripts/build_all.sh` is a convenience wrapper that runs the five builds
+  above in order (tarball, AppImage, Flatpak, deb, rpm) for every architecture
+  and prints a summary with the artifact sizes. The .deb and .rpm are skipped
+  for aarch64 (they are published for x86_64 only). It only forwards options
+  (`--native`, `--skip-build`, `--install`, `--keep-appdir`) and can select
+  targets with `--only`/`--skip` and architectures with `--archs`; with no
+  options it builds x86_64 + aarch64, so QEMU must be available. Each script
+  stays the one to use for a single artifact and keeps its own requirements.
 - `scripts/build_appimage.sh` builds the host-architecture AppImage on the host
   in `build-appimage-<arch>/` with the host Qt (the AppImage bundles Qt and the
   loader, so the build Qt does not matter). linuxdeploy, the Qt plugin and
@@ -215,14 +248,15 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
   replaces `~/.local/bin/sticky-notes` and restarts that file. The replacement
   is atomic: the new file is downloaded/extracted next to the target, checked
   against `SHA256SUMS`, the old one is renamed to `<target>.old` and removed on
-  the next start. Development builds and `/usr/bin` packages are reported as
-  unsupported (not writable): never attempt a self-update there.
+  the next start. Development builds and `/usr/bin` packages (the .deb/.rpm,
+  updated by apt/dnf/zypper) are reported as unsupported (not writable): never
+  attempt a self-update there.
 - `scripts/create_release.sh` uploads every artifact found in `release/` for
-  both architectures plus one `SHA256SUMS` with every release: the updater
-  refuses to install an asset whose hash cannot be verified (it looks the file
-  up by name, so a single checksum file covers all architectures), and the
-  Flatpak asset is one of the three supported installations. A missing
-  architecture is a warning, not an error.
+  both architectures, the x86_64-only `.deb`/`.rpm`, plus one `SHA256SUMS` with
+  every release: the updater refuses to install an asset whose hash cannot be
+  verified (it looks the file up by name, so a single checksum file covers all
+  architectures), and the Flatpak asset is one of the supported installations. A
+  missing architecture is a warning, not an error.
 - The Flatpak `metainfo.xml` under `packaging/` carries its own `<releases>`
   entry: bump it together with `project(... VERSION)` in `CMakeLists.txt`.
 - **The AppImage bundles the C library** (`scripts/build_appimage.sh`): it is

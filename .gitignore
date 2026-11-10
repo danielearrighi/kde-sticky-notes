@@ -21,3 +21,9 @@ release/
 
 # build_flatpak.sh artifacts
 build-flatpak*/
+
+# build_deb.sh artifacts
+build-deb*/
+
+# build_rpm.sh artifacts
+build-rpm*/

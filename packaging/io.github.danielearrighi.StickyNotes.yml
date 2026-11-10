@@ -70,6 +70,8 @@ modules:
           - build-release*
           - build-appimage*
           - build-flatpak*
+          - build-deb*
+          - build-rpm*
           - release
           - docs
           - screens

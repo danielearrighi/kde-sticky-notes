@@ -4,9 +4,15 @@
 # For each target architecture (x86_64 and aarch64 by default, the host one
 # first):
 #
-#   tarball   release/sticky-notes-<version>-<arch>.tar.gz  (scripts/build_release.sh)
-#   appimage  release/sticky-notes-<version>-<arch>.AppImage (scripts/build_appimage.sh)
-#   flatpak   release/sticky-notes-<version>-<arch>.flatpak  (scripts/build_flatpak.sh)
+#   tarball   release/sticky-notes-<version>-<arch>.tar.gz   (scripts/build_release.sh)
+#   appimage  release/sticky-notes-<version>-<arch>.AppImage  (scripts/build_appimage.sh)
+#   flatpak   release/sticky-notes-<version>-<arch>.flatpak   (scripts/build_flatpak.sh)
+#   deb       release/sticky-notes_<version>-1_amd64.deb      (scripts/build_deb.sh)
+#   rpm       release/sticky-notes-<version>-1.x86_64.rpm     (scripts/build_rpm.sh)
+#
+# The tarball, AppImage and Flatpak are published for x86_64 and aarch64; the
+# .deb and .rpm are x86_64 only (the distributions they target run on PCs), so
+# they are skipped for the other architectures.
 #
 # The architecture that is not the host one ("foreign") is built through QEMU
 # user emulation (binfmt_misc): the tarball and the AppImage run the target
@@ -31,7 +37,7 @@ source "$here/lib/arch.sh"
 
 release_dir="$root/release"
 
-all_targets=(tarball appimage flatpak)
+all_targets=(tarball appimage flatpak deb rpm)
 targets=("${all_targets[@]}")
 host_arch="$(sn_host_arch)"
 all_archs=(x86_64 aarch64)
@@ -51,22 +57,22 @@ usage() {
     cat <<'EOF'
 Usage: scripts/build_all.sh [options]
 
-Builds the tarball, the AppImage and the Flatpak bundle for the version in
-CMakeLists.txt, in that order, for every requested architecture.
+Builds the tarball, the AppImage, the Flatpak bundle, the .deb and the .rpm
+for the version in CMakeLists.txt, in that order, for every requested
+architecture. The .deb and .rpm are only built for x86_64.
 
 Options:
   --archs LIST       architectures to build (comma separated): x86_64, aarch64
                      (default: this host plus the other one, host first)
   --only LIST        build only these targets (comma separated):
-                     tarball, appimage, flatpak
+                     tarball, appimage, flatpak, deb, rpm
   --skip LIST        skip these targets (comma separated)
   --native           build the tarball on the host instead of the container
                      (host architecture only, local testing: the tarball may
                      require a newer Qt)
-  --skip-build       reuse the existing builds (passes --skip-build to each
-                     script: build-release-<arch>/sticky-notes,
-                     build-appimage-<arch>/sticky-notes and
-                     build-flatpak-<arch>/repo must already exist)
+  --skip-build       do not compile again, reuse the existing binary
+                     (build-release-<arch>/sticky-notes; passes --skip-build to
+                     each script)
   --keep-appdir      keep scripts/AppDir after the AppImage is created
   --install          install the Flatpak bundle after building it (host
                      architecture only)
@@ -77,7 +83,8 @@ Options:
 Examples:
   scripts/build_all.sh                       # x86_64 + aarch64, all targets
   scripts/build_all.sh --archs x86_64        # only the host architecture
-  scripts/build_all.sh --skip flatpak        # tarballs + AppImages
+  scripts/build_all.sh --skip flatpak        # everything but the Flatpak
+  scripts/build_all.sh --only deb,rpm        # just the distribution packages
   scripts/build_all.sh --only tarball --native
   scripts/build_all.sh --keep-going --install
 EOF
@@ -170,6 +177,8 @@ script_for() {
         tarball)  printf '%s\n' "$here/build_release.sh" ;;
         appimage) printf '%s\n' "$here/build_appimage.sh" ;;
         flatpak)  printf '%s\n' "$here/build_flatpak.sh" ;;
+        deb)      printf '%s\n' "$here/build_deb.sh" ;;
+        rpm)      printf '%s\n' "$here/build_rpm.sh" ;;
     esac
 }
 
@@ -178,7 +187,33 @@ asset_for() { # target arch -> release file
         tarball)  printf '%s\n' "$release_dir/sticky-notes-$version-$2.tar.gz" ;;
         appimage) printf '%s\n' "$release_dir/sticky-notes-$version-$2.AppImage" ;;
         flatpak)  printf '%s\n' "$release_dir/sticky-notes-$version-$2.flatpak" ;;
+        deb)      printf '%s\n' "$release_dir/sticky-notes_${version}-1_$(sn_deb_arch "$2").deb" ;;
+        rpm)      printf '%s\n' "$release_dir/sticky-notes-${version}-1.$(sn_rpm_arch "$2").rpm" ;;
     esac
+}
+
+# .deb and .rpm are built for x86_64 only: that is the architecture published
+# for the target distributions.
+target_archs() {
+    case "$1" in
+        deb|rpm) printf 'x86_64\n' ;;
+        *)       printf 'x86_64 aarch64\n' ;;
+    esac
+}
+
+target_supports_arch() { # target arch
+    local a
+    for a in $(target_archs "$1"); do
+        [[ "$a" == "$2" ]] && return 0
+    done
+    return 1
+}
+
+targets_for_arch() { # arch -> the selected targets built for it
+    local t
+    for t in "${targets[@]}"; do
+        target_supports_arch "$t" "$1" && printf '%s\n' "$t"
+    done
 }
 
 for target in "${targets[@]}"; do
@@ -187,11 +222,22 @@ for target in "${targets[@]}"; do
     [[ -x "$script" ]] || die "Not executable: $script"
 done
 
+# deb/rpm exist for x86_64 only: with --only deb and aarch64 there may be
+# nothing left to do.
+have_work=0
+for arch in "${archs[@]}"; do
+    mapfile -t arch_targets < <(targets_for_arch "$arch")
+    ((${#arch_targets[@]})) && have_work=1
+done
+((have_work)) || die "Nothing to build: ${targets[*]} is built for x86_64 only"
+
 # --- clean ------------------------------------------------------------------
 
 if ((clean_only)); then
     for arch in "${archs[@]}"; do
-        for target in "${targets[@]}"; do
+        mapfile -t arch_targets < <(targets_for_arch "$arch")
+        ((${#arch_targets[@]})) || continue
+        for target in "${arch_targets[@]}"; do
             script="$(script_for "$target")"
             log "Cleaning $target for $arch ($(basename "$script") --clean)"
             "$script" --arch "$arch" --clean
@@ -219,7 +265,13 @@ failed=()
 start=$SECONDS
 
 for arch in "${archs[@]}"; do
+    mapfile -t arch_targets < <(targets_for_arch "$arch")
+    ((${#arch_targets[@]})) || continue
     for target in "${targets[@]}"; do
+        target_supports_arch "$target" "$arch" \
+            || log "Skipping $arch/$target: $target is built for x86_64 only"
+    done
+    for target in "${arch_targets[@]}"; do
         script="$(script_for "$target")"
         label="$arch/$target"
         args=(--arch "$arch")
@@ -270,7 +322,9 @@ done
 printf '\n'
 log "Summary for $version (${archs[*]}), $((SECONDS - start))s:"
 for arch in "${archs[@]}"; do
-    for target in "${targets[@]}"; do
+    mapfile -t arch_targets < <(targets_for_arch "$arch")
+    ((${#arch_targets[@]})) || continue
+    for target in "${arch_targets[@]}"; do
         label="$arch/$target"
         asset="$(asset_for "$target" "$arch")"
         state="${status[$label]:-not built}"

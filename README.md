@@ -6,8 +6,9 @@ Desktop sticky notes for **KDE Plasma (Wayland)**.
 ## Try it!
 
 Download the latest release from the [Releases page](https://github.com/danielearrighi/kde-sticky-notes/releases).
-There are three ways to try it. Every artifact is published for **x86_64** and
-**aarch64**: in the file names below `<arch>` is the one matching `uname -m`.
+There are five ways to try it. The tarball, AppImage and Flatpak are published
+for **x86_64** and **aarch64**; the .deb and .rpm packages are **x86_64 only**.
+In the file names below `<arch>` is the one matching `uname -m`.
 
 **Flatpak** (bundles Qt 6.10 and LayerShellQt in the `org.kde.Platform`
 runtime, so it does not depend on the distribution or on the Qt version
@@ -47,7 +48,35 @@ cd sticky-notes-<version>-<arch>
 
 The installer checks the runtime libraries, offers to install the missing ones with your package manager and copies the app into `~/.local`. Run it with `--help` for the options, and run `sticky-notes` (or the KDE menu entry) afterwards to start it.
 
-> **Qt version:** the tar.gz uses the system Qt and is built against **Qt 6.10 + LayerShellQt 6.6** (the oldest versions the app supports); it runs on any distribution with those or newer (Fedora 44, Tumbleweed, Ubuntu 26.04, ...). If your distribution has an older Qt, `install.sh` stops and points you to the AppImage or the Flatpak, which bundle their own Qt.
+**Debian/Ubuntu package (.deb, x86_64)**: download
+`sticky-notes_<version>-1_amd64.deb` and install it system-wide:
+
+```bash
+sudo apt install ./sticky-notes_<version>-1_amd64.deb
+```
+
+It needs **Ubuntu 26.04+** or **Debian forky/sid+** with the system **Qt 6.10 +
+LayerShellQt 6.6** or newer; on an older release apt refuses to install it (use
+the AppImage or the Flatpak instead). Remove it with
+`sudo apt remove sticky-notes`.
+
+**Fedora/openSUSE package (.rpm, x86_64)**: download
+`sticky-notes-<version>-1.x86_64.rpm` and install it:
+
+```bash
+sudo dnf install ./sticky-notes-<version>-1.x86_64.rpm     # Fedora 44+
+sudo zypper install ./sticky-notes-<version>-1.x86_64.rpm  # openSUSE Tumbleweed
+```
+
+It uses the system Qt 6.10 + LayerShellQt 6.6 or newer. Remove it with
+`sudo dnf remove sticky-notes` or `sudo zypper remove sticky-notes`.
+
+> **Qt version:** the tar.gz, the .deb and the .rpm use the system Qt and are
+> built against **Qt 6.10 + LayerShellQt 6.6** (the oldest versions the app
+> supports); they run on any distribution with those or newer (Fedora 44,
+> Tumbleweed, Ubuntu 26.04, Debian forky, ...). On an older Qt `install.sh`
+> stops, and apt/dnf/zypper refuse to install the package: use the AppImage or
+> the Flatpak, which bundle their own Qt.
 
 ## Build
 
@@ -90,24 +119,44 @@ flatpak install flathub org.kde.Sdk//6.10
 `flatpak-builder` is needed; if it is missing, the script uses the
 `org.flatpak.Builder` Flatpak app (`flatpak install flathub org.flatpak.Builder`).
 
+### Distribution packages (.deb / .rpm)
+
+The .deb and the .rpm package the same portable binary as the tarball (system Qt
+6.10 + LayerShellQt 6.6). They are built in containers, so the host distribution
+does not matter:
+
+```bash
+./scripts/build_deb.sh    # release/sticky-notes_<version>-1_amd64.deb
+./scripts/build_rpm.sh    # release/sticky-notes-<version>-1.x86_64.rpm
+```
+
+`build_deb.sh` runs `dpkg-shlibdeps` in the Ubuntu 26.04 image and adds the
+Wayland QPA plugin and the SQLite driver as dependencies; `build_rpm.sh` runs
+`rpmbuild` in a Fedora 44 image and generates the Fedora/openSUSE rich
+dependencies (Qt >= 6.10, LayerShellQt >= 6.6, QSQLITE). Both accept
+`--skip-build` to repackage an existing `build-release-<arch>/sticky-notes`.
+Only **x86_64** is published.
+
 ### Other architectures (aarch64)
 
 Every build script accepts `--arch x86_64|aarch64` (default: the host one), the
-artifacts are named `release/sticky-notes-<version>-<arch>.*`, and
-`scripts/build_all.sh` builds both architectures and all three artifacts in one
-go:
+artifacts are named `release/sticky-notes-<version>-<arch>.*` (or the Debian/RPM
+conventions above), and `scripts/build_all.sh` builds both architectures and all
+five artifacts in one go:
 
 ```bash
-./scripts/build_all.sh                  # x86_64 + aarch64, tarball + AppImage + Flatpak
+./scripts/build_all.sh                  # x86_64 + aarch64: tarball, AppImage, Flatpak, deb, rpm
 ./scripts/build_all.sh --archs x86_64   # host architecture only
+./scripts/build_all.sh --only deb,rpm   # just the distribution packages
 ```
 
-Building for the architecture you are not running needs QEMU user emulation
-(`qemu-linux-user` on openSUSE, `qemu-user-static` on Fedora/Debian/Ubuntu), and
-the Flatpak bundle needs the SDK of that architecture
-(`flatpak install --arch=aarch64 flathub org.kde.Sdk//6.10`). The tarball and
-the AppImage are built in `scripts/container/ubuntu26.04.Dockerfile`, with one
-container image per architecture; a native aarch64 machine needs nothing
+The .deb and .rpm are x86_64 only: `build_all.sh` skips them for the other
+architecture. Building for the architecture you are not running needs QEMU user
+emulation (`qemu-linux-user` on openSUSE, `qemu-user-static` on
+Fedora/Debian/Ubuntu), and the Flatpak bundle needs the SDK of that architecture
+(`flatpak install --arch=aarch64 flathub org.kde.Sdk//6.10`). The tarball, the
+.deb and the AppImage are built in `scripts/container/ubuntu26.04.Dockerfile`,
+with one container image per architecture; a native aarch64 machine needs nothing
 special. The aarch64 AppImage is built against the container's Qt 6.10 instead
 of the host Qt, because linuxdeploy, its Qt plugin and appimagetool only run on
 the architecture they package.
@@ -115,8 +164,12 @@ the architecture they package.
 
 ## Install
 
-Install for the current user (binary, menu entry and icon, so it shows up in the
-KDE menu and the taskbar):
+The .deb and .rpm install the app system-wide (`/usr/bin`, menu entry and icons)
+with apt, dnf or zypper, as shown in *Try it!*. To remove them use the same
+package manager.
+
+For a per-user install from this source tree (binary, menu entry and icon, so it
+shows up in the KDE menu and the taskbar):
 
 ```bash
 ./scripts/install.sh            # into ~/.local  (PREFIX=... to change it)
@@ -150,9 +203,10 @@ button at any time. Nothing is downloaded without asking: the prompt offers
   repository, or reinstall the newer `.flatpak` bundle. Inside the sandbox
   `/app` is read-only, so the automatic daily check is skipped and the
   *Check for updates* button only reports the new version.
-- **Development builds** (`build/sticky-notes`) and **system packages**
-  (`/usr/bin`, managed by the distribution) cannot update themselves: the
-  dialog only links to the release page.
+- **Development builds** (`build/sticky-notes`) and **system packages** (the
+  .deb/.rpm in `/usr/bin`, managed by apt/dnf/zypper) cannot update themselves:
+  update them with the package manager, the dialog only links to the release
+  page.
 
 The previous file is kept as `sticky-notes.old` until the next successful
 start, so a broken update can be recovered by hand.
