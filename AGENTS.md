@@ -37,9 +37,11 @@ Every build script takes `--arch x86_64|aarch64` (default `uname -m`) and
 A "foreign" architecture (not the host one) is emulated with QEMU user mode, so
 it needs a `binfmt_misc` entry: `qemu-linux-user` on openSUSE,
 `qemu-user-static` on Fedora/Debian/Ubuntu. Each container image and each Flatpak
-SDK is per architecture: `sticky-notes-build:ubuntu26.04-<arch>`,
-`sticky-notes-rpmbuild:fedora44-<arch>` and `org.kde.Sdk//6.10` installed with
-`--arch`.
+SDK is per architecture: `localhost/sticky-notes-build:ubuntu26.04-<arch>`,
+`localhost/sticky-notes-rpmbuild:fedora44-<arch>` and `org.kde.Sdk//6.10`
+installed with `--arch`. The scripts qualify unqualified `--image` tags with
+`localhost/` and run containers with `--pull=never`, so podman never prompts for
+an unqualified short name or pulls a different image from a configured registry.
 
 - `scripts/build_release.sh` builds the tarball binary with
   `scripts/build_portable.sh` inside `scripts/container/ubuntu26.04.Dockerfile`
@@ -71,7 +73,9 @@ SDK is per architecture: `sticky-notes-build:ubuntu26.04-<arch>`,
 - `scripts/build_deb.sh` packages the portable binary into
   `release/sticky-notes_<version>-1_<debarch>.deb` inside the Ubuntu 26.04 image
   (`amd64` for x86_64). `dpkg-shlibdeps` generates the versioned dependencies
-  from the binary's ELF symbols (Qt 6.10, LayerShellQt 6.6) and the script adds
+  from the binary's ELF symbols, but its LayerShellQt shlibs entry only reports
+  the ABI baseline (6.4.90) while the app uses APIs added in 6.6, so the script
+  pins `liblayershellqtinterface6 (>= 6.6)` explicitly. It also adds
   `qt6-wayland` and `libqt6sql6-sqlite`: the QPA and SQLite plugins are loaded
   at runtime, so shlibdeps cannot see them. The package installs the binary, the
   desktop entry, every hicolor icon size, the metainfo (launchable patched to
@@ -93,24 +97,31 @@ SDK is per architecture: `sticky-notes-build:ubuntu26.04-<arch>`,
   the brp strip/debuginfo steps (the binary is already built and may belong to
   the foreign architecture).
 - `scripts/build_all.sh` is a convenience wrapper that runs the five builds
-  above in order (tarball, AppImage, Flatpak, deb, rpm) for every architecture
-  and prints a summary with the artifact sizes. The .deb and .rpm are skipped
-  for aarch64 (they are published for x86_64 only). It only forwards options
-  (`--native`, `--skip-build`, `--install`, `--keep-appdir`) and can select
-  targets with `--only`/`--skip` and architectures with `--archs`; with no
-  options it builds x86_64 + aarch64, so QEMU must be available. Each script
+  in canonical order (tarball, AppImage, Flatpak, deb, rpm) for every
+  architecture and prints a summary with the artifact sizes. When the tarball is
+  selected it runs first and its portable binary is passed to the AppImage, deb
+  and rpm scripts with `--binary`, so they do not compile the same sources
+  again; the Flatpak keeps its own build inside the SDK. The .deb and .rpm are
+  skipped for aarch64 (they are published for x86_64 only). It only forwards
+  options (`--native`, `--skip-build`, `--install`, `--keep-appdir`) and can
+  select targets with `--only`/`--skip` and architectures with `--archs`; with
+  no options it builds x86_64 + aarch64, so QEMU must be available. Each script
   stays the one to use for a single artifact and keeps its own requirements.
-- `scripts/build_appimage.sh` builds the host-architecture AppImage on the host
-  in `build-appimage-<arch>/` with the host Qt (the AppImage bundles Qt and the
-  loader, so the build Qt does not matter). linuxdeploy, the Qt plugin and
-  appimagetool are architecture-specific binaries that must run next to the Qt
-  they deploy, so a foreign architecture rebuilds the script inside the
-  emulated aarch64 container (`APPIMAGE_EXTRACT_AND_RUN=1`, no FUSE inside).
-  That AppImage is therefore built against Ubuntu's Qt 6.10/glibc instead of
-  the host Qt 6.12: the x86_64 and aarch64 AppImages do not share a baseline.
-  The KDE platform theme deployment is skipped when the environment has no
-  `KDEPlasmaPlatformTheme6.so` (the container installs it when the package is
-  available), so an aarch64 AppImage may fall back to the Qt default style.
+- `scripts/build_appimage.sh` builds both architectures by default inside the
+  Ubuntu 26.04 container, in `build-appimage-<arch>/` (`APPIMAGE_EXTRACT_AND_RUN=1`,
+  no FUSE inside), against the same Qt 6.10/glibc baseline. linuxdeploy, the Qt
+  plugin and appimagetool are architecture-specific binaries that must run next
+  to the Qt they deploy, so the container is used for the native architecture
+  too; a foreign one additionally needs QEMU user emulation. A type-2 AppImage
+  header does not match the qemu binfmt ELF magic, so in an emulated container
+  the script mounts the host's static qemu interpreter and runs the tools through
+  it (linuxdeploy's Qt plugin is exposed as wrapper scripts for the same reason).
+  `--binary PATH` reuses an existing binary (used by `build_all.sh`); `--native`
+  builds on the host in `build-appimage-native-<arch>/` for local testing only
+  and may require a newer Qt/glibc. The KDE platform theme deployment is skipped
+  when the environment has no `KDEPlasmaPlatformTheme6.so` (the container
+  installs it when the package is available), so an AppImage may fall back to
+  the Qt default style.
 - The tarball `install.sh` (`scripts/install-release.sh`) distinguishes a
   missing library from a too-old one (`ldd` prints `version '…' not found`):
   the latter cannot be fixed by installing packages, so it refuses to install
@@ -260,12 +271,12 @@ Single target `sticky-notes` built from `src/` (`CMakeLists.txt`). Entry
 - The Flatpak `metainfo.xml` under `packaging/` carries its own `<releases>`
   entry: bump it together with `project(... VERSION)` in `CMakeLists.txt`.
 - **The AppImage bundles the C library** (`scripts/build_appimage.sh`): it is
-  built on a rolling release (Tumbleweed, glibc 2.44) while AppImageHub tests on
-  the oldest Ubuntu LTS still in standard support (glibc 2.35). `AppRun` is a
-  script that execs the bundled `ld-linux` with `--library-path`, and
-  `libstdc++`/`libgcc_s` are bundled as well because the build GCC is newer than
-  the target's. Do not let linuxdeploy's symlink replace `AppRun` and do not
-  drop the copy step: without it the AppImage is rejected as "glibc too new".
+  built in Ubuntu 26.04 (glibc 2.43) while AppImageHub tests on the oldest Ubuntu
+  LTS still in standard support (glibc 2.35). `AppRun` is a script that execs the
+  bundled `ld-linux` with `--library-path`, and `libstdc++`/`libgcc_s` are
+  bundled as well because the build GCC is newer than the target's. Do not let
+  linuxdeploy's symlink replace `AppRun` and do not drop the copy step: without
+  it the AppImage is rejected as "glibc too new".
 
 ## Git
 

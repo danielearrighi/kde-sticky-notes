@@ -43,7 +43,7 @@ Options:
                  container; only for the host architecture, and the resulting
                  tarball may require a newer Qt
   --skip-build   do not build, reuse the selected binary
-  --clean        remove release/, then exit
+  --clean        remove this architecture's tarballs from release/, then exit
   -h, --help     show this help
 EOF
 }
@@ -63,9 +63,16 @@ done
 
 release_dir="$root/release"
 
+arch="${arch:-$(sn_host_arch)}"
+sn_known_arch "$arch" || { echo "Unsupported architecture: $arch (need x86_64 or aarch64)" >&2; exit 1; }
+
 if ((clean_only)); then
-    rm -rf "$release_dir"
-    echo "Removed $release_dir"
+    # Match the other target scripts: remove only this architecture's assets,
+    # not the whole release directory (which may contain other targets and
+    # versions).
+    rm -f "$release_dir"/sticky-notes-*-"$arch".tar.gz
+    rm -rf "$release_dir"/sticky-notes-*-"$arch"
+    echo "Removed the $arch tarballs from $release_dir"
     exit 0
 fi
 
@@ -80,9 +87,6 @@ installer="$root/scripts/install-release.sh"
 for f in "$desktop" "$icon" "$installer"; do
     [[ -f "$f" ]] || { echo "Missing required file: $f" >&2; exit 1; }
 done
-
-arch="${arch:-$(sn_host_arch)}"
-sn_known_arch "$arch" || { echo "Unsupported architecture: $arch (need x86_64 or aarch64)" >&2; exit 1; }
 
 # --- 1. Release binary -----------------------------------------------------
 
@@ -125,16 +129,10 @@ if command -v readelf >/dev/null 2>&1; then
     esac
 fi
 
-# Version is read from the binary; fall back to CMakeLists.txt because
-# `--version` still constructs a QApplication and thus needs a working display,
-# and a foreign binary cannot be executed without QEMU.
-version=""
-if sn_is_native "$arch"; then
-    version="$("$binary" --version 2>/dev/null | awk '{print $2}' || true)"
-fi
-if [[ -z "$version" ]]; then
-    version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMakeLists.txt" | head -1)"
-fi
+# The version is generated from project(... VERSION) in CMakeLists.txt. Do not
+# execute the binary: --version constructs a QApplication, needs a display and
+# would abort under QEMU when the binary is foreign.
+version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMakeLists.txt" | head -1)"
 [[ -n "$version" ]] || { echo "Could not determine the version" >&2; exit 1; }
 log "Version: $version"
 log "Architecture: $arch"

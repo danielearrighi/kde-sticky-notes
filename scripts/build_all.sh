@@ -19,7 +19,14 @@
 # toolchain in an Ubuntu 26.04 container, the Flatpak builds inside the KDE
 # runtime of that architecture. An aarch64 host needs nothing special, an
 # x86_64 host can produce the ARM artifacts once QEMU is installed (the scripts
-# print the package name per distribution when it is missing).
+# print the package name per distribution when it is missing). The AppImage
+# tools are not ELF-compatible with binfmt_misc, so build_appimage.sh mounts the
+# host's static qemu interpreter and runs them through it explicitly.
+#
+# When the tarball is selected it runs first: the portable binary it builds is
+# passed to the AppImage, deb and rpm scripts with --binary, so they package the
+# same binary instead of recompiling it. The Flatpak keeps its own build inside
+# the SDK.
 #
 # This is only a convenience wrapper: each script keeps its own requirements and
 # its own options, and is still the one to use for a single artifact. The
@@ -67,18 +74,20 @@ Options:
   --only LIST        build only these targets (comma separated):
                      tarball, appimage, flatpak, deb, rpm
   --skip LIST        skip these targets (comma separated)
-  --native           build the tarball on the host instead of the container
-                     (host architecture only, local testing: the tarball may
-                     require a newer Qt)
-  --skip-build       do not compile again, reuse the existing binary
-                     (build-release-<arch>/sticky-notes; passes --skip-build to
-                     each script)
+  --native           build the tarball and AppImage on the host instead of the
+                     container (host architecture only, local testing: the
+                     artifacts may require a newer Qt/glibc)
+  --skip-build       do not compile again, reuse the existing build trees
+                     (passes --skip-build to each script)
   --keep-appdir      keep scripts/AppDir after the AppImage is created
   --install          install the Flatpak bundle after building it (host
                      architecture only)
   --keep-going       continue with the remaining targets when one fails
   --clean            run the --clean step of every target, then exit
   -h, --help         show this help
+
+When the tarball is selected it runs first and its portable binary is reused by
+the AppImage, deb and rpm targets; the Flatpak always builds inside its SDK.
 
 Examples:
   scripts/build_all.sh                       # x86_64 + aarch64, all targets
@@ -167,6 +176,19 @@ if [[ -n "$skip_list" ]]; then
     ((${#targets[@]})) || die "Every target was skipped: nothing to do"
 fi
 
+# Canonical order: the tarball runs first, so the portable binary it builds can
+# be reused by the other targets instead of compiling the same sources again.
+ordered=()
+for t in "${all_targets[@]}"; do
+    for selected in "${targets[@]}"; do
+        if [[ "$t" == "$selected" ]]; then
+            ordered+=("$t")
+            break
+        fi
+    done
+done
+targets=("${ordered[@]}")
+
 # --- inputs -----------------------------------------------------------------
 
 version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMakeLists.txt" | head -1)"
@@ -248,8 +270,12 @@ if ((clean_only)); then
 fi
 
 # The foreign architectures run their toolchain through QEMU: fail early with
-# the install command instead of failing inside the first container run.
+# the install command instead of failing inside the first container run. Only
+# architectures that actually have work are checked: e.g. --only deb,rpm on
+# x86_64 must not ask for aarch64 emulation when no aarch64 target is built.
 for arch in "${archs[@]}"; do
+    mapfile -t arch_targets < <(targets_for_arch "$arch")
+    ((${#arch_targets[@]})) || continue
     sn_require_binfmt "$arch"
 done
 
@@ -261,6 +287,7 @@ log "Architectures: ${archs[*]}"
 log "Targets: ${targets[*]}"
 
 declare -A status=()
+declare -A portable_binary=()
 failed=()
 start=$SECONDS
 
@@ -276,17 +303,24 @@ for arch in "${archs[@]}"; do
         label="$arch/$target"
         args=(--arch "$arch")
         case "$target" in
-            tarball)
-                if ((native)); then
-                    if [[ "$arch" == "$host_arch" ]]; then
-                        args+=(--native)
-                    else
-                        log "Skipping --native for $target on $arch (built in the container)"
-                    fi
+            tarball|appimage)
+                if ((native)) && [[ "$arch" == "$host_arch" ]]; then
+                    args+=(--native)
+                elif [[ -n "${portable_binary[$arch]:-}" ]]; then
+                    # Do not compile the same sources again: package the
+                    # portable binary already built for this architecture.
+                    args+=(--binary "${portable_binary[$arch]}")
+                elif ((native)); then
+                    log "Skipping --native for $target on $arch (built in the container)"
+                fi
+                if [[ "$target" == appimage ]] && ((keep_appdir)); then
+                    args+=(--keep-appdir)
                 fi
                 ;;
-            appimage)
-                ((keep_appdir)) && args+=(--keep-appdir)
+            deb|rpm)
+                if [[ -n "${portable_binary[$arch]:-}" ]]; then
+                    args+=(--binary "${portable_binary[$arch]}")
+                fi
                 ;;
             flatpak)
                 if ((install_flatpak)); then
@@ -303,6 +337,22 @@ for arch in "${archs[@]}"; do
         log "=== $label: $(basename "$script")${args[*]:+ ${args[*]}} ==="
         if "$script" "${args[@]}"; then
             status[$label]="ok"
+            case "$target" in
+                tarball)
+                    # A native tarball uses the host Qt and cannot feed the
+                    # container-packaged artifacts.
+                    if ((!native)) || [[ "$arch" != "$host_arch" ]]; then
+                        if [[ -x "$root/build-release-$arch/sticky-notes" ]]; then
+                            portable_binary[$arch]="$root/build-release-$arch/sticky-notes"
+                        fi
+                    fi
+                    ;;
+                deb|rpm)
+                    if [[ -x "$root/build-release-$arch/sticky-notes" ]]; then
+                        portable_binary[$arch]="$root/build-release-$arch/sticky-notes"
+                    fi
+                    ;;
+            esac
         else
             rc=$?
             status[$label]="failed (exit $rc)"

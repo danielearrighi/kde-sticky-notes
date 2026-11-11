@@ -107,6 +107,16 @@ sn_require_binfmt() {
     fi
 }
 
+# Qualify a locally built image tag. Podman treats an unqualified name as a
+# short name and searches the configured registries (which can prompt or pull
+# the wrong image); a localhost/ prefix keeps it local.
+sn_local_image() {
+    case "$1" in
+        */*) printf '%s\n' "$1" ;;
+        *)   printf 'localhost/%s\n' "$1" ;;
+    esac
+}
+
 # Print the container engine from CONTAINER_ENGINE, podman or docker. Fails when
 # none is usable.
 sn_container_engine() {

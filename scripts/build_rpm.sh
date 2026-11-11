@@ -47,8 +47,9 @@ Options:
                    only x86_64 is published, aarch64 needs QEMU
   --binary PATH    reuse an existing binary (implies --skip-build)
   --engine NAME    container engine to use (podman or docker; default: auto)
-  --image TAG      build image tag (default: sticky-notes-rpmbuild:fedora44;
-                   the architecture is appended)
+  --image TAG      build image tag (default: localhost/sticky-notes-rpmbuild:fedora44;
+                   the architecture is appended; an unqualified name is treated
+                   as local)
   --rebuild-image  rebuild the image from scratch (--no-cache)
   --skip-build     do not build the binary, reuse build-release-<arch>/sticky-notes
   --clean          remove build-rpm-<arch> and this architecture's .rpm, then exit
@@ -135,8 +136,8 @@ fi
 command -v "$engine" >/dev/null 2>&1 || die "Container engine not found: $engine"
 
 dockerfile="$here/container/fedora44.Dockerfile"
-image_base="${image_base:-${STICKY_NOTES_RPMBUILD_IMAGE:-sticky-notes-rpmbuild:fedora44}}"
-image="$image_base-$arch"
+image_base="${image_base:-${STICKY_NOTES_RPMBUILD_IMAGE:-localhost/sticky-notes-rpmbuild:fedora44}}"
+image="$(sn_local_image "$image_base-$arch")"
 
 sn_require_binfmt "$arch"
 platform_args=()
@@ -152,7 +153,7 @@ else
     log "Reusing image $image"
 fi
 
-run_args=(--rm "${platform_args[@]}" -v "$root:/work:Z" -w /work -e HOME=/tmp)
+run_args=(--rm --pull=never "${platform_args[@]}" -v "$root:/work:Z" -w /work -e HOME=/tmp)
 if [[ "$engine" == "podman" ]]; then
     run_args+=(--userns=keep-id)
 else

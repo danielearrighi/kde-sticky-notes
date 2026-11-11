@@ -24,7 +24,7 @@ root="$(cd "$here/.." && pwd)"                                 # repository root
 source "$here/lib/arch.sh"
 
 dockerfile="$here/container/ubuntu26.04.Dockerfile"
-image_base="${STICKY_NOTES_BUILD_IMAGE:-sticky-notes-build:ubuntu26.04}"
+image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:ubuntu26.04}"
 
 arch=""
 engine=""
@@ -43,8 +43,9 @@ Options:
   --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).
                    A foreign architecture needs QEMU user mode (binfmt_misc)
   --engine NAME    container engine to use (podman or docker; default: auto)
-  --image TAG      base build image tag (default: sticky-notes-build:ubuntu26.04;
-                   the architecture is appended, so each arch has its own image)
+  --image TAG      base build image tag (default: localhost/sticky-notes-build:ubuntu26.04;
+                   the architecture is appended, so each arch has its own image;
+                   an unqualified name is treated as local)
   --rebuild-image  rebuild the image from scratch (--no-cache)
   --skip-build     do not build, only check build-release-<arch>/sticky-notes
   -h, --help       show this help
@@ -75,7 +76,7 @@ arch="${arch:-$(sn_host_arch)}"
 sn_known_arch "$arch" || die "Unsupported architecture: $arch (need x86_64 or aarch64)"
 
 platform="$(sn_platform "$arch")"
-image="$image_base-$arch"
+image="$(sn_local_image "$image_base-$arch")"
 build_dir_name="build-release-$arch"
 build_dir="$root/$build_dir_name"
 binary="$build_dir/sticky-notes"
@@ -128,14 +129,14 @@ mkdir -p "$build_dir"
 if [[ ! -w "$build_dir" ]]; then
     # A previous rootful docker run can leave the directory owned by root.
     log "Fixing ownership of $build_dir"
-    "$engine" run --rm "${platform_args[@]}" -v "$root:/work:Z" -w /work "$image" \
+    "$engine" run --rm --pull=never "${platform_args[@]}" -v "$root:/work:Z" -w /work "$image" \
         chown -R "$(id -u):$(id -g)" "$build_dir_name"
 fi
 
 # Run as the invoking user so the build tree is not left owned by root. podman
 # needs keep-id (its default rootless mapping would turn the host user into a
 # subuid); docker (rootful) just needs --user.
-run_args=(--rm "${platform_args[@]}" -v "$root:/work:Z" -w /work -e HOME=/tmp)
+run_args=(--rm --pull=never "${platform_args[@]}" -v "$root:/work:Z" -w /work -e HOME=/tmp)
 if [[ "$engine" == "podman" ]]; then
     run_args+=(--userns=keep-id)
 else

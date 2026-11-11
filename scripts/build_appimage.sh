@@ -9,17 +9,25 @@
 # app does not fall back to a light Fusion look.
 #
 # The C library, its loader and libstdc++ are bundled (X-AppImage-Libc=bundled):
-# this script runs on a rolling release (glibc 2.44 on Tumbleweed), while the
-# AppImageHub test runs on the oldest Ubuntu LTS still in standard support
-# (glibc 2.35), and an AppImage must run on both.
+# the AppImage must run on the oldest Ubuntu LTS still in standard support
+# (glibc 2.35) as well as on current distributions, so its payload cannot rely
+# on the build host's C library.
 #
-# --arch selects the target architecture (default: the host one). linuxdeploy,
-# the Qt plugin and appimagetool only exist as binaries for their own
-# architecture, and they must run next to the Qt of that architecture, so a
-# foreign architecture is built by re-running this script inside the aarch64
-# build container (scripts/container/ubuntu26.04.Dockerfile) through QEMU user
-# emulation. The x86_64 AppImage keeps being built on the host with the host Qt.
+# --arch selects the target architecture (default: the host one). Both
+# architectures are built by default inside the Ubuntu 26.04 build container
+# (scripts/container/ubuntu26.04.Dockerfile), against the same Qt 6.10/glibc
+# baseline: linuxdeploy, the Qt plugin and appimagetool only exist as binaries
+# for their own architecture, and they must run next to the Qt they deploy.
+# A foreign architecture additionally needs QEMU user emulation; its AppImage
+# tools are executed through the host's static qemu interpreter because the
+# type-2 header does not match binfmt_misc's ELF magic. --native is a host-only
+# escape hatch for local testing and may require a newer Qt/glibc.
 set -euo pipefail
+
+# linuxdeploy may run the application while scanning it; without a display the
+# app aborts, and a foreign binary would leave a core dump in the working tree.
+# Keep build runs clean: the build does not need those cores.
+ulimit -c 0 2>/dev/null || true
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
 root="$(cd "$here/.." && pwd)"                                 # repository root
@@ -28,10 +36,12 @@ root="$(cd "$here/.." && pwd)"                                 # repository root
 source "$here/lib/arch.sh"
 
 dockerfile="$here/container/ubuntu26.04.Dockerfile"
-image_base="${STICKY_NOTES_BUILD_IMAGE:-sticky-notes-build:ubuntu26.04}"
+image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:ubuntu26.04}"
 
 arch=""
 engine=""
+binary_override=""
+native_build=0
 skip_build=0
 keep_appdir=0
 clean_only=0
@@ -43,16 +53,25 @@ Usage: scripts/build_appimage.sh [options]
 
 Options:
   --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).
-                   A foreign architecture is built inside an emulated container
-                   and needs QEMU user mode (binfmt_misc)
-  --engine NAME    container engine used for a foreign architecture
+                   Both architectures default to the Ubuntu 26.04 container; a
+                   foreign one additionally needs QEMU user mode (binfmt_misc)
+  --engine NAME    container engine used for the container build
                    (podman or docker; default: auto)
-  --image TAG      base build image tag (default: sticky-notes-build:ubuntu26.04;
-                   the architecture is appended, so each arch has its own image)
+  --image TAG      base build image tag (default: localhost/sticky-notes-build:ubuntu26.04;
+                   the architecture is appended, so each arch has its own image;
+                   an unqualified name is treated as local)
   --rebuild-image  rebuild the container image from scratch (--no-cache)
+  --binary PATH    reuse an existing binary instead of compiling (path relative
+                   to the repository root, or absolute inside it; implies
+                   --skip-build)
+  --native         build on the host with the host Qt instead of the container
+                   (host architecture only; local testing, the AppImage may
+                   require a newer Qt/glibc)
   --skip-build     reuse the existing build-appimage-<arch>/sticky-notes
+                   (with --native: build-appimage-native-<arch>/sticky-notes)
   --keep-appdir    keep the temporary AppDir used to assemble the AppImage
-  --clean          remove downloaded tools/, AppDir/ and the build trees, then exit
+  --clean          remove tools/, AppDir/, this architecture's build trees and
+                   AppImages, then exit
   -h, --help       show this help
 
 Environment:
@@ -66,7 +85,9 @@ while (($#)); do
         --arch)          arch="${2:?--arch needs an architecture}"; shift ;;
         --engine)        engine="${2:?--engine needs a name}"; shift ;;
         --image)         image_base="${2:?--image needs a tag}"; shift ;;
+        --binary)        binary_override="${2:?--binary needs a path}"; shift ;;
         --rebuild-image) rebuild_image=1 ;;
+        --native)        native_build=1 ;;
         --skip-build)    skip_build=1 ;;
         --keep-appdir)   keep_appdir=1 ;;
         --clean)         clean_only=1 ;;
@@ -82,24 +103,56 @@ appdir="$here/AppDir"
 log() { printf '[build_appimage] %s\n' "$*"; }
 die() { printf 'build_appimage: %s\n' "$*" >&2; exit 1; }
 
-if ((clean_only)); then
-    rm -rf "$tools_dir" "$appdir"
-    rm -rf "$root"/build-appimage-*
-    echo "Removed $tools_dir, $appdir and the AppImage build trees"
-    exit 0
+# In an emulated container the AppImage tools must go through the mounted qemu
+# interpreter instead of exec'ing them directly (see the container branch).
+run_tool() {
+    if [[ -n "${STICKY_NOTES_QEMU:-}" ]]; then
+        "$STICKY_NOTES_QEMU" "$@"
+    else
+        "$@"
+    fi
+}
+
+# --binary must be visible inside the container bind mount too: normalize it to
+# an absolute path under the repository and keep a relative form for the
+# re-executed script inside /work.
+if [[ -n "$binary_override" ]]; then
+    [[ "$binary_override" == /* ]] || binary_override="$root/$binary_override"
+    binary_abs="$(realpath -m "$binary_override")"
+    root_canon="$(realpath -m "$root")"
+    case "$binary_abs" in
+        "$root_canon"/*) ;;
+        *) die "--binary must be inside the repository ($root)" ;;
+    esac
+    binary_rel="${binary_abs#"$root_canon"/}"
+    binary_override="$binary_abs"
+    skip_build=1
 fi
 
 arch="${arch:-$(sn_host_arch)}"
 sn_known_arch "$arch" || die "Unsupported architecture: $arch (need x86_64 or aarch64)"
 platform="$(sn_platform "$arch")"
 
-# --- foreign architecture: rebuild inside a container of that architecture --
+if ((clean_only)); then
+    rm -rf "$tools_dir" "$appdir"
+    rm -rf "$root/build-appimage-$arch" "$root/build-appimage-native-$arch"
+    rm -f "$root/release"/sticky-notes-*-"$arch".AppImage
+    echo "Removed $tools_dir, $appdir, the AppImage build trees and the $arch AppImages"
+    exit 0
+fi
 
-if ! sn_is_native "$arch"; then
-    [[ -z "${STICKY_NOTES_IN_CONTAINER:-}" ]] \
-        || die "Nested cross build for $arch inside the container"
-    sn_require_binfmt "$arch"
+if ((native_build)) && ! sn_is_native "$arch"; then
+    die "--native builds on this host only; use the container for $arch"
+fi
+
+# --- container baseline -----------------------------------------------------
+
+if [[ -z "${STICKY_NOTES_IN_CONTAINER:-}" ]] && ((!native_build)); then
     [[ -f "$dockerfile" ]] || die "Missing $dockerfile"
+
+    # Only the foreign architecture needs QEMU; the native one runs natively
+    # in its container.
+    sn_is_native "$arch" || sn_require_binfmt "$arch"
 
     if [[ -z "$engine" ]]; then
         engine="$(sn_container_engine || true)"
@@ -107,21 +160,37 @@ if ! sn_is_native "$arch"; then
     [[ -n "$engine" ]] || die "No container engine found: install podman or docker to build the $arch AppImage"
     command -v "$engine" >/dev/null 2>&1 || die "Container engine not found: $engine"
 
-    image="$image_base-$arch"
+    platform_args=()
+    sn_is_native "$arch" || platform_args=(--platform "$platform")
+
+    image="$(sn_local_image "$image_base-$arch")"
     if ((rebuild_image)); then
         log "Rebuilding $image from scratch"
-        "$engine" build --no-cache --platform "$platform" -t "$image" -f "$dockerfile" "$here/container"
+        "$engine" build --no-cache "${platform_args[@]}" -t "$image" -f "$dockerfile" "$here/container"
     elif ! "$engine" image inspect "$image" >/dev/null 2>&1; then
         log "Building $image (first run only)"
-        "$engine" build --platform "$platform" -t "$image" -f "$dockerfile" "$here/container"
+        "$engine" build "${platform_args[@]}" -t "$image" -f "$dockerfile" "$here/container"
     else
         log "Reusing image $image"
+    fi
+
+    # A foreign AppImage tool cannot be executed through binfmt_misc: the
+    # type-2 AppImage header ("AI\x02" at offset 8) does not match the ELF
+    # magic the kernel registered for qemu-aarch64. Mount the host's static
+    # qemu interpreter and run the AppImage tools through it explicitly.
+    qemu_args=()
+    if ! sn_is_native "$arch"; then
+        qemu_bin="$(command -v "qemu-$arch" || command -v "qemu-$arch-static" || true)"
+        [[ -n "$qemu_bin" ]] || die "Missing QEMU user emulation for $arch"
+        qemu_args=(-v "$qemu_bin:/run/qemu-target:ro"
+                   -e STICKY_NOTES_QEMU=/run/qemu-target)
     fi
 
     # Run as the invoking user so the build tree is not left owned by root, and
     # force APPIMAGE_EXTRACT_AND_RUN: inside the container the AppImage tools
     # cannot mount themselves.
-    run_args=(--rm --platform "$platform" -v "$root:/work:Z" -w /work
+    run_args=(--rm --pull=never "${platform_args[@]}" "${qemu_args[@]}"
+              -v "$root:/work:Z" -w /work
               -e HOME=/tmp -e APPIMAGE_EXTRACT_AND_RUN=1
               -e STICKY_NOTES_IN_CONTAINER=1)
     if [[ "$engine" == "podman" ]]; then
@@ -131,7 +200,11 @@ if ! sn_is_native "$arch"; then
     fi
 
     forward=(--arch "$arch")
-    ((skip_build)) && forward+=(--skip-build)
+    if [[ -n "$binary_override" ]]; then
+        forward+=(--binary "$binary_rel")
+    elif ((skip_build)); then
+        forward+=(--skip-build)
+    fi
     ((keep_appdir)) && forward+=(--keep-appdir)
 
     log "Building the $arch AppImage inside $image"
@@ -141,7 +214,16 @@ fi
 
 # --- inputs ----------------------------------------------------------------
 
-binary="$root/build-appimage-$arch/sticky-notes"
+if [[ -n "$binary_override" ]]; then
+    binary="$binary_override"
+else
+    if ((native_build)); then
+        build_dir="$root/build-appimage-native-$arch"
+    else
+        build_dir="$root/build-appimage-$arch"
+    fi
+    binary="$build_dir/sticky-notes"
+fi
 desktop="$root/scripts/sticky-notes.desktop"
 icon="$root/resources/icons/sticky-notes.png"
 
@@ -151,21 +233,46 @@ done
 
 # --- 1. Release binary -----------------------------------------------------
 
-if ((skip_build)); then
+if [[ -n "$binary_override" ]]; then
+    [[ -x "$binary" ]] || die "Binary not found: $binary"
+    sn_verify_binary_arch "$binary" "$arch"
+    # The container packages the Ubuntu 26.04 Qt. A binary built against a
+    # newer host Qt cannot be mixed with it (Qt is forward compatible only).
+    if [[ -n "${STICKY_NOTES_IN_CONTAINER:-}" ]] && ! ((native_build)); then
+        required_qt="$(readelf -V "$binary" 2>/dev/null \
+            | grep -o 'Qt_6\.[0-9][0-9]*' | sort -Vu | tail -1 || true)"
+        if [[ -n "$required_qt" ]] \
+                && [[ "$(printf '%s\n' Qt_6.10 "$required_qt" | sort -V | tail -1)" != Qt_6.10 ]]; then
+            die "$binary requires $required_qt, newer than the container's Qt 6.10; use --native or build it with build_portable.sh"
+        fi
+    fi
+    log "Using $binary"
+elif ((skip_build)); then
     [[ -x "$binary" ]] || { echo "Binary not found: $binary (drop --skip-build)" >&2; exit 1; }
+    if [[ -n "${STICKY_NOTES_IN_CONTAINER:-}" && ! -f "$build_dir/.container-build" ]]; then
+        die "$binary was not built in the container baseline; drop --skip-build"
+    fi
     log "Reusing $binary"
 else
+    # A build tree left by an older host build uses a different Qt/glibc
+    # baseline: discard it once instead of silently mixing the two.
+    if [[ -n "${STICKY_NOTES_IN_CONTAINER:-}" && -f "$build_dir/CMakeCache.txt" \
+            && ! -f "$build_dir/.container-build" ]]; then
+        log "Discarding the previous host build in $build_dir"
+        rm -rf "$build_dir"
+    fi
     log "Configuring and building (Release)"
-    cmake -S "$root" -B "$root/build-appimage-$arch" -G Ninja -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$root/build-appimage-$arch"
+    cmake -S "$root" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$build_dir"
+    if [[ -n "${STICKY_NOTES_IN_CONTAINER:-}" ]]; then
+        touch "$build_dir/.container-build"
+    fi
 fi
 
-# Version is read from the binary; fall back to CMakeLists.txt because
-# `--version` still constructs a QApplication and thus needs a working display.
-version="$("$binary" --version 2>/dev/null | awk '{print $2}' || true)"
-if [[ -z "$version" ]]; then
-    version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMakeLists.txt" | head -1)"
-fi
+# The version is generated from project(... VERSION) in CMakeLists.txt. Do not
+# execute the binary: --version constructs a QApplication, and a foreign binary
+# aborts under QEMU without a display, leaving a core dump and slowing the build.
+version="$(sed -n 's/^project([^)]*VERSION \([0-9][0-9.]*\).*/\1/p' "$root/CMakeLists.txt" | head -1)"
 [[ -n "$version" ]] || { echo "Could not determine the version" >&2; exit 1; }
 log "Version: $version ($arch)"
 
@@ -173,35 +280,79 @@ log "Version: $version ($arch)"
 
 appimage_tool="$tools_dir/appimagetool-$arch.AppImage"
 linuxdeploy="$tools_dir/linuxdeploy-$arch.AppImage"
-qt_plugin="$tools_dir/linuxdeploy-plugin-qt-$arch.AppImage"
 runtime="$tools_dir/runtime-$arch"
 
+# Keep the real plugin AppImage under a name that linuxdeploy's
+# `linuxdeploy-plugin-qt*` search cannot pick up, and expose only the current
+# architecture under the names it searches. Mixing the x86_64 and aarch64
+# plugins in the same tools directory otherwise makes linuxdeploy run the wrong
+# one.
+qt_plugin_real="$tools_dir/qt-plugin-$arch.AppImage"
+rm -f "$tools_dir/linuxdeploy-plugin-qt-$arch.AppImage.real"
+
 fetch() { # url destination
-    local url="$1" dest="$2"
+    local url="$1" dest="$2" tmp
     if [[ -s "$dest" ]]; then
         log "Already present: $(basename "$dest")"
         return
     fi
     log "Downloading $(basename "$dest")"
-    curl -fSL --retry 3 -o "$dest" "$url" \
-        || { echo "Download failed: $url" >&2; rm -f "$dest"; exit 1; }
+    # Download into the container's /tmp and install the file afterwards.
+    # Inside the aarch64 container curl cannot open a new file on the /work
+    # bind mount (it fails with EACCES), while shell redirection and install
+    # work; writing to /tmp avoids the problem for both architectures.
+    tmp="$(mktemp /tmp/sticky-notes-download.XXXXXX)" \
+        || { echo "Could not create a temporary download file" >&2; exit 1; }
+    if ! curl -fSL --retry 3 -o "$tmp" "$url"; then
+        echo "Download failed: $url" >&2
+        rm -f "$tmp" "$dest"
+        exit 1
+    fi
+    install -m755 "$tmp" "$dest" \
+        || { echo "Could not install $dest" >&2; rm -f "$tmp" "$dest"; exit 1; }
+    rm -f "$tmp"
 }
 
 mkdir -p "$tools_dir"
 fetch "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$arch.AppImage" "$linuxdeploy"
-fetch "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$arch.AppImage" "$qt_plugin"
+fetch "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$arch.AppImage" "$qt_plugin_real"
 fetch "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage" "$appimage_tool"
 fetch "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch" "$runtime"
-chmod +x "$linuxdeploy" "$qt_plugin" "$appimage_tool" "$runtime"
+chmod +x "$linuxdeploy" "$qt_plugin_real" "$appimage_tool" "$runtime"
 
 # linuxdeploy resolves --plugin qt by looking for `linuxdeploy-plugin-qt` next to
 # itself (also with an .AppImage suffix), so expose the downloaded file once.
-# Use hard links, not symlinks: this directory lives under a Synology Drive sync
-# folder, and the client cannot sync symbolic links (it retries forever with
-# "Server response unexpected error 'System error'").
-ln -f "$qt_plugin" "$tools_dir/linuxdeploy-plugin-qt.AppImage"
+# Remove any exposed names left by the other architecture first.
+rm -f "$tools_dir"/linuxdeploy-plugin-qt \
+      "$tools_dir"/linuxdeploy-plugin-qt.AppImage \
+      "$tools_dir"/linuxdeploy-plugin-qt-*
+
+# In an emulated container linuxdeploy execs the plugin itself; a type-2 AppImage
+# does not match the qemu binfmt magic, so the exposed names must be wrappers
+# that go through the mounted qemu interpreter. Otherwise use hard links: this
+# directory lives under a Synology Drive sync folder, and the client cannot sync
+# symbolic links (it retries forever with "Server response unexpected error
+# 'System error'").
+if [[ -n "${STICKY_NOTES_QEMU:-}" ]]; then
+    for name in linuxdeploy-plugin-qt \
+                linuxdeploy-plugin-qt.AppImage \
+                "linuxdeploy-plugin-qt-$arch.AppImage" \
+                "linuxdeploy-plugin-qt-$arch"; do
+        cat > "$tools_dir/$name" <<EOF
+#!/bin/sh
+exec "$STICKY_NOTES_QEMU" "$qt_plugin_real" "\$@"
+EOF
+        chmod +x "$tools_dir/$name"
+    done
+else
+    for name in linuxdeploy-plugin-qt \
+                linuxdeploy-plugin-qt.AppImage \
+                "linuxdeploy-plugin-qt-$arch.AppImage" \
+                "linuxdeploy-plugin-qt-$arch"; do
+        ln -f "$qt_plugin_real" "$tools_dir/$name"
+    done
+fi
 ln -f "$linuxdeploy" "$tools_dir/linuxdeploy.AppImage"
-ln -f "$qt_plugin" "$tools_dir/linuxdeploy-plugin-qt"
 
 # --- 3. AppDir -------------------------------------------------------------
 
@@ -254,7 +405,7 @@ if [[ ! -e /dev/fuse ]] && ! command -v fusermount >/dev/null 2>&1 \
 fi
 
 log "Running linuxdeploy (this scans and copies the Qt/KDE dependencies)"
-"$linuxdeploy" \
+run_tool "$linuxdeploy" \
     --appdir "$appdir" \
     --executable "$appdir/usr/bin/sticky-notes" \
     --desktop-file "$appdir/sticky-notes.desktop" \
@@ -312,7 +463,7 @@ output="$root/release/sticky-notes-$version-$arch.AppImage"
 mkdir -p "$root/release"
 rm -f "$output"
 log "Creating $output"
-ARCH="$arch" "$appimage_tool" --runtime-file "$runtime" "$appdir" "$output"
+ARCH="$arch" run_tool "$appimage_tool" --runtime-file "$runtime" "$appdir" "$output"
 chmod +x "$output"
 
 if ((!keep_appdir)); then

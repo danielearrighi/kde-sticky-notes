@@ -53,8 +53,9 @@ Options:
 
 Environment:
   CONTAINER_ENGINE          same as --engine
-  STICKY_NOTES_BUILD_IMAGE  base image tag (default: sticky-notes-build:ubuntu26.04;
-                            the architecture is appended)
+  STICKY_NOTES_BUILD_IMAGE  base image tag (default: localhost/sticky-notes-build:ubuntu26.04;
+                            the architecture is appended; an unqualified name
+                            is treated as local)
 EOF
 }
 
@@ -132,8 +133,8 @@ if [[ -z "$engine" ]]; then
 fi
 command -v "$engine" >/dev/null 2>&1 || die "Container engine not found: $engine"
 
-image_base="${STICKY_NOTES_BUILD_IMAGE:-sticky-notes-build:ubuntu26.04}"
-image="$image_base-$arch"
+image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:ubuntu26.04}"
+image="$(sn_local_image "$image_base-$arch")"
 dockerfile="$here/container/ubuntu26.04.Dockerfile"
 
 sn_require_binfmt "$arch"
@@ -146,7 +147,7 @@ if ! "$engine" image inspect "$image" >/dev/null 2>&1; then
     "$engine" build "${platform_args[@]}" -t "$image" -f "$dockerfile" "$here/container"
 fi
 
-run_args=(--rm "${platform_args[@]}" -v "$root:/work:Z" -w /work -e HOME=/tmp)
+run_args=(--rm --pull=never "${platform_args[@]}" -v "$root:/work:Z" -w /work -e HOME=/tmp)
 if [[ "$engine" == "podman" ]]; then
     run_args+=(--userns=keep-id)
 else
@@ -255,6 +256,16 @@ depends="$(sed -n 's/^shlibs:Depends=//p' "$deps_out" | tail -1)"
 # QPA plugin (qt6-wayland, separate from QtGui on Debian/Ubuntu) and the SQLite
 # driver that Storage needs.
 depends+=", qt6-wayland, libqt6sql6-sqlite"
+
+# dpkg-shlibdeps only sees the LayerShellQt soname, and its shlibs entry reports
+# the ABI baseline (>= 6.4.90), not the API version the app uses. The app calls
+# setDesiredSize()/setActivateOnShow(), added in 6.6, so pin the real minimum
+# explicitly. Qt itself is already pinned by dpkg-shlibdeps (>= 6.10).
+if [[ "$depends" == *"liblayershellqtinterface6"* ]]; then
+    depends="$(sed -E 's/liblayershellqtinterface6( \(>= [^)]*\))?/liblayershellqtinterface6 (>= 6.6)/' <<<"$depends")"
+else
+    depends+=", liblayershellqtinterface6 (>= 6.6)"
+fi
 
 installed_size="$(du -sk --exclude=DEBIAN "$stage" | cut -f1)"
 (
