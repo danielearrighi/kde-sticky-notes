@@ -387,9 +387,13 @@ void AppController::onSettingsChanged()
 {
     const bool snap = Storage::instance().setting(QStringLiteral("snap"), QStringLiteral("1"))
                       == QLatin1String("1");
+    const bool keepOnShowDesktop =
+        Storage::instance().setting(QStringLiteral("keep_on_show_desktop"), QStringLiteral("1"))
+        == QLatin1String("1");
     for (NoteWindow *w : std::as_const(m_windows)) {
         w->applyTheme(Storage::instance().note(w->noteId()).themeId);
         w->setSnappingEnabled(snap);
+        w->setKeepOnShowDesktop(keepOnShowDesktop);
     }
     applyAutostart();
     updateTrayIcon();

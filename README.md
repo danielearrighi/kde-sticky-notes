@@ -225,6 +225,8 @@ start, so a broken update can be recovered by hand.
   and build your own themes with the color picker in the settings.
 - **Always on top or on the desktop** — per note, from the context menu.
 - **Opacity** — fade each note from 100% down to 10%, per note, from the context menu.
+- **Show Desktop** — notes stay visible when you press Super+D, like desktop
+  widgets; the behavior can be turned off in the settings.
 - **Manage notes from the hub** — the taskbar icon opens a grid of notes (open,
   hide, delete, new) plus a **trash** and the **settings**, where you can also
   back up and restore your notes.

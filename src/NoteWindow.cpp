@@ -107,6 +107,18 @@ constexpr int kMaxImageSide = 900;
 // and on dark custom ones without computing a colour per theme.
 constexpr int kCodeBackgroundAlpha = 25;
 
+/// Layer-shell namespace that decides how KWin classifies a note. KWin derives
+/// the window type from the namespace: "dock" is exempt from Show Desktop
+/// (Super+D), while an unknown scope becomes a normal window and is hidden with
+/// the other windows. "desktop" is deliberately not used: KWin reserves that
+/// namespace for the wallpaper and includes those surfaces in its desktop focus
+/// fallback (findDesktop()).
+QString noteLayerScope(bool keepOnShowDesktop)
+{
+    return keepOnShowDesktop ? QStringLiteral("dock")
+                             : QStringLiteral("sticky-notes-note");
+}
+
 // ---- screen identity -------------------------------------------------------
 
 /// Key that identifies a monitor: its resolution plus the connector name, e.g.
@@ -985,6 +997,9 @@ NoteWindow::NoteWindow(const Note &note, QWidget *parent)
                                         : note.title);
     m_snapEnabled = Storage::instance().setting(QStringLiteral("snap"), QStringLiteral("1"))
                     == QLatin1String("1");
+    m_keepOnShowDesktop =
+        Storage::instance().setting(QStringLiteral("keep_on_show_desktop"), QStringLiteral("1"))
+        == QLatin1String("1");
     setAttribute(Qt::WA_StyledBackground, true);
     setAttribute(Qt::WA_TranslucentBackground, true);
     setObjectName(QStringLiteral("noteWindow"));
@@ -1209,7 +1224,8 @@ void NoteWindow::configureLayerShell()
         return;
     }
     using LS = LayerShellQt::Window;
-    m_layer->setScope(QStringLiteral("sticky-notes-note"));
+    // The scope decides how KWin classifies the surface (see noteLayerScope()).
+    m_layer->setScope(noteLayerScope(m_keepOnShowDesktop));
     m_layer->setLayer(m_note.layer == QLatin1String("bottom") ? LS::LayerBottom : LS::LayerTop);
     // A note is not focusable by default. With OnDemand always set, KWin
     // considers the note a focus candidate (wantsInput()) and hands it the
@@ -1529,6 +1545,32 @@ void NoteWindow::onFocusLayerTimeout()
     // compositor would hand the keyboard to this note when no normal window
     // has focus (see configureLayerShell()).
     setKeyboardInteractive(false);
+}
+
+void NoteWindow::setKeepOnShowDesktop(bool keep)
+{
+    if (m_keepOnShowDesktop == keep)
+        return;
+    m_keepOnShowDesktop = keep;
+    if (!m_layer)
+        return;
+
+    m_layer->setScope(noteLayerScope(keep));
+
+    // KWin reads the namespace when it creates the layer surface; the protocol
+    // cannot change it afterwards. Recreate the surface (not the window, so
+    // content, scroll position and layer-shell state survive) while the note is
+    // visible. A hidden note has no surface: the new scope is picked up when it
+    // is shown again.
+    if (isVisible()) {
+        // The recreated surface must not ask for keyboard focus: the user is in
+        // the settings window, and notes only take focus when clicked.
+        setKeyboardInteractive(false);
+        hide();
+        show();
+        applySize();
+        applyMargins();
+    }
 }
 
 void NoteWindow::setSnappingEnabled(bool enabled)

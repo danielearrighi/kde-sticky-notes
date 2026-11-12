@@ -96,6 +96,8 @@
   "settings.tray_icon_tooltip": "Icône affichée dans la zone de notification. Utilisée lorsque « Fermer vers la zone de notification » garde l'application active.",
   "settings.tray_icon_pick_title": "Choisir l'icône de notification",
   "settings.tray_icon_filter": "Images (*.png *.svg *.jpg *.jpeg *.webp)",
+  "settings.keep_on_show_desktop": "Garder les notes visibles avec Afficher le bureau",
+  "settings.keep_on_show_desktop_tooltip": "Si cette option est activée, les notes restent à l'écran lorsque vous appuyez sur Super+D (Afficher le bureau), comme les widgets du bureau. Désactivez-la pour les masquer avec les autres fenêtres.",
   "settings.snap": "Aligner les notes lors du déplacement et du redimensionnement",
   "settings.snap_tooltip": "Lorsqu'un bord de la note rencontre le bord d'une note voisine, la note marque une pause pour faciliter l'alignement. Désactivez pour déplacer et redimensionner librement.",
   "settings.check_updates": "Rechercher les mises à jour automatiquement (une fois par jour)",

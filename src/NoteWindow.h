@@ -46,6 +46,10 @@ public:
     /// Enables/disables the pause when an edge meets the edge of a nearby note
     /// (both dragging and resizing). Disabling clears any hold in progress.
     void setSnappingEnabled(bool enabled);
+    /// Keeps the note visible while Show Desktop (Super+D) is active. Changing
+    /// it recreates the layer surface, since KWin reads the scope only when the
+    /// surface is created.
+    void setKeepOnShowDesktop(bool keep);
     /// The layer the note is configured to live on ("top" or "bottom"), not the
     /// layer it may be raised to temporarily while focused: the menu entry
     /// toggles this persistent setting.
@@ -289,6 +293,8 @@ private:
     ResizeHold m_resizeHoldY;
     /// Whether the "snap" setting is on (see setSnappingEnabled()).
     bool m_snapEnabled = true;
+    /// Whether the note uses the "dock" scope (see setKeepOnShowDesktop()).
+    bool m_keepOnShowDesktop = true;
     bool m_loading = false;
 
     /// Key of the screen the note is currently on ("<W>x<H>|<connector>", built

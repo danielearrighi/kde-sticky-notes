@@ -98,6 +98,8 @@
   "settings.tray_icon_tooltip": "Icon shown in the system tray. Used when “Close to system tray” keeps the app running there.",
   "settings.tray_icon_pick_title": "Choose tray icon",
   "settings.tray_icon_filter": "Images (*.png *.svg *.jpg *.jpeg *.webp)",
+  "settings.keep_on_show_desktop": "Keep notes visible with Show Desktop",
+  "settings.keep_on_show_desktop_tooltip": "When enabled, notes stay on screen when you press Super+D (Show Desktop), like desktop widgets. Disable to hide them with the other windows.",
   "settings.snap": "Snap notes while moving and resizing",
   "settings.snap_tooltip": "When a note edge meets the edge of a nearby note, the note pauses for a moment to help alignment. Disable to move and resize notes freely.",
   "settings.check_updates": "Check for updates automatically (once a day)",

@@ -98,6 +98,8 @@
   "settings.tray_icon_tooltip": "Icono que se muestra en la bandeja del sistema. Se usa cuando «Cerrar a la bandeja del sistema» mantiene la aplicación ahí.",
   "settings.tray_icon_pick_title": "Elegir el icono de la bandeja",
   "settings.tray_icon_filter": "Imágenes (*.png *.svg *.jpg *.jpeg *.webp)",
+  "settings.keep_on_show_desktop": "Mantener las notas visibles al mostrar el escritorio",
+  "settings.keep_on_show_desktop_tooltip": "Si está activado, las notas permanecen en pantalla al pulsar Super+D (Mostrar escritorio), como los widgets del escritorio. Desactívalo para ocultarlas con las demás ventanas.",
   "settings.snap": "Ajustar las notas al moverlas y redimensionarlas",
   "settings.snap_tooltip": "Cuando el borde de una nota se encuentra con el de una nota cercana, la nota se detiene un momento para facilitar la alineación. Desactívalo para mover y redimensionar las notas libremente.",
   "settings.check_updates": "Buscar actualizaciones automáticamente (una vez al día)",

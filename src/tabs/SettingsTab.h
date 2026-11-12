@@ -58,6 +58,7 @@ private:
     QCheckBox *m_autostart = nullptr;
     QCheckBox *m_confirmDelete = nullptr;
     QCheckBox *m_closeToTray = nullptr;
+    QCheckBox *m_keepOnShowDesktop = nullptr;
     QComboBox *m_trayIcon = nullptr;
     QLabel *m_trayIconPreview = nullptr;
     QPushButton *m_trayIconChoose = nullptr;

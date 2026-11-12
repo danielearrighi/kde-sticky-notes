@@ -98,6 +98,8 @@
   "settings.tray_icon_tooltip": "Icona mostrata nella barra di sistema. Si usa quando “Riduci nella barra di sistema” lascia l'app in esecuzione lì.",
   "settings.tray_icon_pick_title": "Scegli l'icona della barra",
   "settings.tray_icon_filter": "Immagini (*.png *.svg *.jpg *.jpeg *.webp)",
+  "settings.keep_on_show_desktop": "Mantieni le note visibili con Visualizza desktop",
+  "settings.keep_on_show_desktop_tooltip": "Se attivo, le note restano visibili quando premi Super+D (Visualizza desktop), come i widget del desktop. Disattiva per nasconderle insieme alle altre finestre.",
   "settings.snap": "Aggancia le note durante spostamento e ridimensionamento",
   "settings.snap_tooltip": "Quando il bordo di una nota incontra quello di una nota vicina, la nota si ferma per un attimo per facilitare l'allineamento. Disattiva per spostare e ridimensionare le note liberamente.",
   "settings.check_updates": "Controlla automaticamente gli aggiornamenti (una volta al giorno)",
