@@ -6,10 +6,10 @@
 # it comes from project(... VERSION) in CMakeLists.txt.
 #
 # The package targets x86_64 Fedora and openSUSE (only x86_64 is published).
-# The binary is linked against Qt 6.10 and LayerShellQt 6.6 (the tarball
-# baseline): any distribution with those or newer works. The versioned
-# dependencies reject an older Qt before installing a binary that would fail to
-# start. (The .deb is separate and builds on Debian 13 against Qt 6.8.)
+# The binary is linked against Qt 6.8 and LayerShellQt 6.3.4 (the Debian 13
+# baseline every artifact shares): any distribution with those or newer works.
+# The versioned dependencies reject an older Qt before installing a binary that
+# would fail to start.
 
 %global __os_install_post %{nil}
 %global debug_package %{nil}
@@ -23,11 +23,11 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/danielearrighi/kde-sticky-notes
 Source0:        %{name}-%{version}.tar.gz
 
-# Qt 6.10 and LayerShellQt 6.6 are the minimums. The alternatives cover the
+# Qt 6.8 and LayerShellQt 6.3.4 are the minimums. The alternatives cover the
 # Fedora names (qt6-qtbase, layer-shell-qt) and the openSUSE ones
 # (libQt6Core6, layer-shell-qt6).
-Requires:       (qt6-qtbase >= 6.10 or libQt6Core6 >= 6.10)
-Requires:       (layer-shell-qt >= 6.6 or layer-shell-qt6 >= 6.6)
+Requires:       (qt6-qtbase >= 6.8 or libQt6Core6 >= 6.8)
+Requires:       (layer-shell-qt >= 6.3.4 or layer-shell-qt6 >= 6.3.4)
 # Storage needs the QSQLITE driver, loaded at runtime: a separate package on
 # openSUSE (qt6-sql-sqlite), inside qt6-qtbase on Fedora. A package dependency
 # instead of a file path: rpm does not always load filelists metadata.

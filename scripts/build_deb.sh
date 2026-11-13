@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Build a Debian package (.deb) for Sticky Notes.
 #
-# The binary is compiled and packaged inside scripts/container/debian13.Dockerfile
-# (Debian 13 "trixie": Qt 6.8.2 + LayerShellQt 6.3.4). Building on the oldest
-# supported distribution matters because Qt is forward compatible but NOT
-# backward compatible: this single package also runs on Ubuntu 26.04+ / Debian
-# forky (Qt 6.10 + LayerShellQt 6.6). NoteWindow.cpp compiles out the two
-# LayerShellQt calls added after 6.3, and a tripwire below refuses a binary
-# that would require a newer Qt than trixie's.
+# The binary is the portable release build (scripts/build_portable.sh, Debian 13
+# "trixie": Qt 6.8.2 + LayerShellQt 6.3.4) — the same file the tarball, the
+# AppImage and the .rpm ship. Building on the oldest supported distribution
+# matters because Qt is forward compatible but NOT backward compatible: this
+# single package also runs on Ubuntu 26.04+ / Debian forky (Qt 6.10 +
+# LayerShellQt 6.6). NoteWindow.cpp compiles out the two LayerShellQt calls
+# added after 6.3, and a tripwire below refuses a binary that would require a
+# newer Qt than trixie's.
 #
 # dpkg-shlibdeps generates the runtime dependencies against those libraries, so
 # apt installs the package where Qt 6.8 and LayerShellQt 6.3.4 exist and refuses
@@ -42,9 +43,9 @@ usage() {
 Usage: scripts/build_deb.sh [options]
 
 Builds release/sticky-notes_<version>-1_<debarch>.deb in the Debian 13
-("trixie") build container, compiling the binary there against the system
-Qt 6.8 + LayerShellQt 6.3.4 and packaging it with dpkg. The package uses the
-system Qt6 and LayerShellQt and is installable on Debian 13 and newer.
+("trixie") build container, packaging the portable binary built there against
+the system Qt 6.8 + LayerShellQt 6.3.4. The package uses the system Qt6 and
+LayerShellQt and is installable on Debian 13 and newer.
 
 Options:
   --arch ARCH    target architecture: x86_64 or aarch64 (default: uname -m);
@@ -52,13 +53,13 @@ Options:
   --binary PATH  reuse an existing binary built in the Debian 13 container
                  (implies --skip-build)
   --engine NAME  container engine to use (podman or docker; default: auto)
-  --skip-build   do not compile, reuse build-deb-<arch>/build/sticky-notes
+  --skip-build   do not compile, reuse build-release-<arch>/sticky-notes
   --clean        remove build-deb-<arch> and this architecture's .deb, then exit
   -h, --help     show this help
 
 Environment:
   CONTAINER_ENGINE          same as --engine
-  STICKY_NOTES_DEB_IMAGE    base image tag (default: localhost/sticky-notes-deb:debian13;
+  STICKY_NOTES_BUILD_IMAGE  base image tag (default: localhost/sticky-notes-build:debian13;
                             the architecture is appended; an unqualified name
                             is treated as local)
 EOF
@@ -118,7 +119,9 @@ if [[ -z "$engine" ]]; then
 fi
 command -v "$engine" >/dev/null 2>&1 || die "Container engine not found: $engine"
 
-image_base="${STICKY_NOTES_DEB_IMAGE:-localhost/sticky-notes-deb:debian13}"
+# STICKY_NOTES_DEB_IMAGE is the old name of the image variable, still honored
+# so an existing environment keeps working instead of silently falling back.
+image_base="${STICKY_NOTES_BUILD_IMAGE:-${STICKY_NOTES_DEB_IMAGE:-localhost/sticky-notes-build:debian13}}"
 image="$(sn_local_image "$image_base-$arch")"
 dockerfile="$here/container/debian13.Dockerfile"
 
@@ -141,24 +144,21 @@ fi
 
 # --- 2. Release binary ------------------------------------------------------
 
-# Compiled here, not with build_portable.sh: the tarball baseline (Ubuntu 26.04,
-# Qt 6.10) would make the package uninstallable on Debian 13. Qt is forward
-# compatible, so this Qt 6.8 binary also runs on Ubuntu 26.04+.
-binbuild_rel="build-deb-$arch/build"
-binary="$root/$binbuild_rel/sticky-notes"
+# The same portable binary every other artifact ships: built once by
+# build_portable.sh in this very Debian 13 image, then packaged here.
+binary="$root/build-release-$arch/sticky-notes"
 
 if [[ -n "$binary_override" ]]; then
     binary="$binary_override"
     log "Using $binary"
 elif ((skip_build)); then
+    [[ -x "$binary" ]] || die "Binary not found: $binary (drop --skip-build)"
     log "Reusing $binary"
 else
-    log "Building the binary in $image (Debian 13: Qt 6.8 + LayerShellQt 6.3)"
-    if ! "$engine" run "${run_args[@]}" "$image" bash -lc \
-            "cmake -S /work -B '/work/$binbuild_rel' -G Ninja -DCMAKE_BUILD_TYPE=Release \
-             && cmake --build '/work/$binbuild_rel'"; then
-        die "Compilation failed"
-    fi
+    log "Building the portable binary (Debian 13: Qt 6.8 + LayerShellQt 6.3)"
+    portable_args=(--arch "$arch" --image "$image_base")
+    [[ -n "$engine" ]] && portable_args+=(--engine "$engine")
+    "$here/build_portable.sh" "${portable_args[@]}"
     log "Using $binary"
 fi
 [[ -x "$binary" ]] || die "Binary not found: $binary"

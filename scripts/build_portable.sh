@@ -8,10 +8,11 @@
 #
 #   .local/bin/sticky-notes: /lib64/libQt6Core.so.6: version `Qt_6.12' not found
 #
-# This script builds inside scripts/container/ubuntu26.04.Dockerfile
-# (Qt 6.10, LayerShellQt 6.6: the tarball baseline) and writes
-# build-release-<arch>/sticky-notes. The image is built once and cached. The
-# .deb does not use this binary: it builds on Debian 13, see build_deb.sh.
+# This script builds inside scripts/container/debian13.Dockerfile
+# (Qt 6.8, LayerShellQt 6.3.4: the single baseline of every release artifact)
+# and writes build-release-<arch>/sticky-notes. The image is built once and
+# cached. The AppImage, the .deb and the .rpm reuse this tree instead of
+# compiling the sources again.
 #
 # --arch selects the target: the default is the host architecture. A foreign
 # architecture is emulated with QEMU user mode (binfmt_misc), so an x86_64 host
@@ -24,8 +25,8 @@ root="$(cd "$here/.." && pwd)"                                 # repository root
 # shellcheck source=lib/arch.sh
 source "$here/lib/arch.sh"
 
-dockerfile="$here/container/ubuntu26.04.Dockerfile"
-image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:ubuntu26.04}"
+dockerfile="$here/container/debian13.Dockerfile"
+image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:debian13}"
 
 arch=""
 engine=""
@@ -36,15 +37,16 @@ usage() {
     cat <<'EOF'
 Usage: scripts/build_portable.sh [options]
 
-Builds build-release-<arch>/sticky-notes against Qt 6.10 + LayerShellQt 6.6 in a
-container (Ubuntu 26.04), so the release tarball also runs on distributions
-with a newer Qt than the build machine. The .deb has its own Debian 13 build.
+Builds build-release-<arch>/sticky-notes against Qt 6.8 + LayerShellQt 6.3.4 in
+a container (Debian 13), so the release binary also runs on distributions with
+a newer Qt than the build machine. Every other artifact (AppImage, .deb, .rpm)
+packages this same binary.
 
 Options:
   --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).
                    A foreign architecture needs QEMU user mode (binfmt_misc)
   --engine NAME    container engine to use (podman or docker; default: auto)
-  --image TAG      base build image tag (default: localhost/sticky-notes-build:ubuntu26.04;
+  --image TAG      base build image tag (default: localhost/sticky-notes-build:debian13;
                    the architecture is appended, so each arch has its own image;
                    an unqualified name is treated as local)
   --rebuild-image  rebuild the image from scratch (--no-cache)
@@ -154,10 +156,10 @@ required_qt="$(readelf -V "$binary" 2>/dev/null | grep -o 'Qt_6\.[0-9][0-9]*' | 
 log "Built $binary ($arch)"
 if [[ -n "$required_qt" ]]; then
     log "Requires Qt ${required_qt#Qt_} or newer"
-    # Tripwire: the whole point of this script is the Qt 6.10 baseline. If the
-    # container's Qt moves forward (or the app starts using newer APIs), the
-    # tarball silently becomes less portable.
-    expected_qt="Qt_6.10"
+    # Tripwire: this is the baseline every artifact shares. If the container's
+    # Qt moves forward (or the app starts using newer APIs), every artifact
+    # silently becomes less portable.
+    expected_qt="Qt_6.8"
     if [[ "$(printf '%s\n' "$expected_qt" "$required_qt" | sort -V | tail -1)" != "$expected_qt" ]]; then
         die "the built binary requires $required_qt, newer than the $expected_qt baseline"
     fi

@@ -14,10 +14,11 @@
 # on the build host's C library.
 #
 # --arch selects the target architecture (default: the host one). Both
-# architectures are built by default inside the Ubuntu 26.04 build container
-# (scripts/container/ubuntu26.04.Dockerfile), against the same Qt 6.10/glibc
-# baseline: linuxdeploy, the Qt plugin and appimagetool only exist as binaries
-# for their own architecture, and they must run next to the Qt they deploy.
+# architectures are built by default inside the Debian 13 build container
+# (scripts/container/debian13.Dockerfile), against the same Qt 6.8/glibc
+# baseline as the tarball and the .deb: linuxdeploy, the Qt plugin and
+# appimagetool only exist as binaries for their own architecture, and they must
+# run next to the Qt they deploy.
 # A foreign architecture additionally needs QEMU user emulation; its AppImage
 # tools are executed through the host's static qemu interpreter because the
 # type-2 header does not match binfmt_misc's ELF magic. --native is a host-only
@@ -35,8 +36,8 @@ root="$(cd "$here/.." && pwd)"                                 # repository root
 # shellcheck source=lib/arch.sh
 source "$here/lib/arch.sh"
 
-dockerfile="$here/container/ubuntu26.04.Dockerfile"
-image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:ubuntu26.04}"
+dockerfile="$here/container/debian13.Dockerfile"
+image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:debian13}"
 
 arch=""
 engine=""
@@ -53,11 +54,11 @@ Usage: scripts/build_appimage.sh [options]
 
 Options:
   --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).
-                   Both architectures default to the Ubuntu 26.04 container; a
+                   Both architectures default to the Debian 13 container; a
                    foreign one additionally needs QEMU user mode (binfmt_misc)
   --engine NAME    container engine used for the container build
                    (podman or docker; default: auto)
-  --image TAG      base build image tag (default: localhost/sticky-notes-build:ubuntu26.04;
+  --image TAG      base build image tag (default: localhost/sticky-notes-build:debian13;
                    the architecture is appended, so each arch has its own image;
                    an unqualified name is treated as local)
   --rebuild-image  rebuild the container image from scratch (--no-cache)
@@ -236,14 +237,14 @@ done
 if [[ -n "$binary_override" ]]; then
     [[ -x "$binary" ]] || die "Binary not found: $binary"
     sn_verify_binary_arch "$binary" "$arch"
-    # The container packages the Ubuntu 26.04 Qt. A binary built against a
+    # The container packages the Debian 13 Qt. A binary built against a
     # newer host Qt cannot be mixed with it (Qt is forward compatible only).
     if [[ -n "${STICKY_NOTES_IN_CONTAINER:-}" ]] && ! ((native_build)); then
         required_qt="$(readelf -V "$binary" 2>/dev/null \
             | grep -o 'Qt_6\.[0-9][0-9]*' | sort -Vu | tail -1 || true)"
         if [[ -n "$required_qt" ]] \
-                && [[ "$(printf '%s\n' Qt_6.10 "$required_qt" | sort -V | tail -1)" != Qt_6.10 ]]; then
-            die "$binary requires $required_qt, newer than the container's Qt 6.10; use --native or build it with build_portable.sh"
+                && [[ "$(printf '%s\n' Qt_6.8 "$required_qt" | sort -V | tail -1)" != Qt_6.8 ]]; then
+            die "$binary requires $required_qt, newer than the container's Qt 6.8; use --native or build it with build_portable.sh"
         fi
     fi
     log "Using $binary"
@@ -373,7 +374,7 @@ cp "$icon"    "$appdir/usr/share/icons/hicolor/256x256/apps/"
 if [[ -z "${QMAKE:-}" ]]; then
     QMAKE="$(command -v qmake6 || command -v qmake || true)"
 fi
-# Ubuntu and other distributions keep qmake6 out of PATH when only the -dev
+# Debian, Ubuntu and others keep qmake6 out of PATH when only the -dev
 # packages are installed (the container build hits this).
 if [[ -z "$QMAKE" ]]; then
     for candidate in /usr/lib/qt6/bin/qmake6 /usr/lib64/qt6/bin/qmake6 \
@@ -385,9 +386,21 @@ fi
 
 export ARCH="$arch"
 export QMAKE
-# Force the Wayland platform plugin (and with it liblayer-shell.so): the Qt
-# plugin defaults to the X11 plugin only, which would make the app unlaunchable.
-export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
+# Force the Wayland platform plugin, otherwise the Qt plugin defaults to the X11
+# one and the app is unlaunchable. Ubuntu's Qt 6.10 ships a single
+# libqwayland.so; Debian 13's Qt 6.8 splits it into libqwayland-egl.so and
+# libqwayland-generic.so, so deploy whatever this Qt provides.
+qt_plugins_dir="$("$QMAKE" -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+wayland_plugins=()
+for candidate in libqwayland.so libqwayland-egl.so libqwayland-generic.so; do
+    if [[ -n "$qt_plugins_dir" && -f "$qt_plugins_dir/platforms/$candidate" ]]; then
+        wayland_plugins+=("$candidate")
+    fi
+done
+((${#wayland_plugins[@]})) \
+    || die "No Wayland platform plugin in ${qt_plugins_dir:-the Qt plugin directory}: install qt6-wayland"
+export EXTRA_PLATFORM_PLUGINS="$(IFS=';'; printf '%s' "${wayland_plugins[*]}")"
+log "Deploying platform plugins: $EXTRA_PLATFORM_PLUGINS"
 # Pull in KDEPlasmaPlatformTheme6.so + breeze6.so, otherwise the AppImage looks
 # light/Fusion even on a dark Plasma desktop. The aarch64 build container may
 # not have the theme (it is optional there), so only enable the deployment when
@@ -416,12 +429,14 @@ run_tool "$linuxdeploy" \
 rm -f "$appdir/usr/plugins/platformthemes/libqgtk3.so"
 
 # --- 4b. C library, loader and C++ runtime ---------------------------------
-# The build host decides which glibc the payload needs, and it is the newest
-# (Tumbleweed). Bundling libc together with its loader makes the AppImage
-# independent of the host's C library: AppImageHub then reports
-# X-AppImage-Libc=bundled instead of rejecting it as "glibc too new".
-# libstdc++ and libgcc_s must go with it because this GCC is newer than the
-# target's (libicu needs CXXABI_1.3.15), and linuxdeploy never bundles them.
+# The build environment decides which glibc the payload needs; in the container
+# that is Debian 13's (2.41), with --native the host's (newer). Either way it is
+# newer than the oldest supported Ubuntu LTS (2.35), so bundling libc together
+# with its loader makes the AppImage independent of the host's C library:
+# AppImageHub then reports X-AppImage-Libc=bundled instead of rejecting it as
+# "glibc too new". libstdc++ and libgcc_s must go with it because the build GCC
+# is newer than the target's (libicu needs CXXABI_1.3.15), and linuxdeploy never
+# bundles them.
 
 log "Bundling glibc, the dynamic loader and libstdc++"
 glibc_dir="$(dirname "$(readlink -f "$(ldd "$binary" | awk '/libc\.so\.6/ { print $3; exit }')")")"

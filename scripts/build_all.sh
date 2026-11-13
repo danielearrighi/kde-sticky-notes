@@ -15,19 +15,20 @@
 # they are skipped for the other architectures.
 #
 # The architecture that is not the host one ("foreign") is built through QEMU
-# user emulation (binfmt_misc): the tarball and the AppImage run the target
-# toolchain in an Ubuntu 26.04 container, the Flatpak builds inside the KDE
+# user emulation (binfmt_misc): the tarball, the AppImage and the .deb run the
+# target toolchain in a Debian 13 container, the Flatpak builds inside the KDE
 # runtime of that architecture. An aarch64 host needs nothing special, an
 # x86_64 host can produce the ARM artifacts once QEMU is installed (the scripts
 # print the package name per distribution when it is missing). The AppImage
 # tools are not ELF-compatible with binfmt_misc, so build_appimage.sh mounts the
 # host's static qemu interpreter and runs them through it explicitly.
 #
-# When the tarball is selected it runs first: the portable binary it builds is
-# passed to the AppImage and rpm scripts with --binary, so they package the same
-# binary instead of recompiling it. The deb is the exception: it compiles in its
-# own Debian 13 container (Qt 6.8), because Debian 13 ships an older Qt than the
-# tarball baseline. The Flatpak keeps its own build inside the SDK.
+# All the artifacts that link or bundle Qt share one baseline (Debian 13:
+# Qt 6.8 + LayerShellQt 6.3.4, scripts/container/debian13.Dockerfile). When the
+# tarball is selected it runs first: the portable binary it builds is passed to
+# the AppImage, .deb and rpm scripts with --binary, so they package the same
+# binary instead of compiling the same sources three more times. The Flatpak
+# keeps its own build inside the KDE SDK.
 #
 # This is only a convenience wrapper: each script keeps its own requirements and
 # its own options, and is still the one to use for a single artifact. The
@@ -349,7 +350,7 @@ for arch in "${archs[@]}"; do
                     args+=(--keep-appdir)
                 fi
                 ;;
-            rpm)
+            rpm|deb)
                 if [[ -n "${portable_binary[$arch]:-}" ]]; then
                     args+=(--binary "${portable_binary[$arch]}")
                 fi

@@ -9,8 +9,9 @@
 # libraries: the target machine must already have them, so it only runs on a
 # KDE Plasma (Wayland) that also has the runtime packages.
 #
-# By default the binary is built by scripts/build_portable.sh inside an
-# ubuntu:26.04 container (Qt 6.10, LayerShellQt 6.6). That is not optional
+# By default the binary is built by scripts/build_portable.sh inside a
+# debian:13 container (Qt 6.8, LayerShellQt 6.3.4), the oldest baseline the app
+# supports and the one every release artifact shares. That is not optional
 # pedantry: Qt is only forward compatible, and a binary built on the rolling
 # host (Qt 6.12) fails on Fedora (Qt 6.11) with "version `Qt_6.12' not found".
 # Use --native only for a local test build.
@@ -111,7 +112,7 @@ elif ((native_build)); then
         cmake --build "$root/build"
     fi
 else
-    # Portable build against Qt 6.10 + LayerShellQt 6.6 (see build_portable.sh).
+    # Portable build against Qt 6.8 + LayerShellQt 6.3.4 (see build_portable.sh).
     binary="$root/build-release-$arch/sticky-notes"
     portable_args=(--arch "$arch")
     ((skip_build)) && portable_args+=(--skip-build)
@@ -176,11 +177,11 @@ on the target machine.
 - A **Wayland** session with layer-shell support: KWin since **Plasma 6.6**, or
   a wlroots compositor. GNOME (Mutter) and X11 sessions do **not** implement the
   protocol and cannot run the app.
-- Qt6 runtime libraries: Core, Gui, Widgets, Sql, Network — **6.10 or newer**.
-- **LayerShellQt** (\`libLayerShellQtInterface.so\`) — **6.6 or newer**.
+- Qt6 runtime libraries: Core, Gui, Widgets, Sql, Network — **6.8 or newer**.
+- **LayerShellQt** (\`libLayerShellQtInterface.so\`) — **6.3.4 or newer**.
 
-The binary is built against Qt 6.10 and LayerShellQt 6.6; newer ones work too.
-On a distribution with an older Qt (e.g. an older Ubuntu or Debian) use the
+The binary is built against Qt 6.8 and LayerShellQt 6.3.4; newer ones work too.
+On a distribution with an older Qt (e.g. an older Debian or Ubuntu) use the
 self-contained **AppImage** or the **Flatpak**, which bundle their own Qt.
 
 To check the missing libraries before launching:

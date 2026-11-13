@@ -2,8 +2,8 @@
 # Build an RPM package (.rpm) for Sticky Notes (Fedora, openSUSE).
 #
 # Packaging needs no compiler: the binary is the portable build made by
-# scripts/build_portable.sh (Qt 6.10 + LayerShellQt 6.6, glibc from Ubuntu
-# 26.04), which runs on Fedora 44 and openSUSE Tumbleweed. This script stages
+# scripts/build_portable.sh (Qt 6.8 + LayerShellQt 6.3.4, glibc from Debian 13),
+# which runs on Fedora 44 and openSUSE Tumbleweed. This script stages
 # it and runs rpmbuild inside scripts/container/fedora44.Dockerfile, so the host
 # distribution does not matter.
 #
@@ -112,7 +112,7 @@ if [[ -n "$binary_override" ]]; then
     [[ -x "$binary" ]] || die "Binary not found: $binary"
     log "Using $binary"
 else
-    # Portable build against Qt 6.10 + LayerShellQt 6.6 (see build_portable.sh).
+    # Portable build against Qt 6.8 + LayerShellQt 6.3.4 (see build_portable.sh).
     binary="$root/build-release-$arch/sticky-notes"
     portable_args=(--arch "$arch")
     ((skip_build)) && portable_args+=(--skip-build)

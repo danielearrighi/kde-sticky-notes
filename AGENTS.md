@@ -37,16 +37,25 @@ Every build script takes `--arch x86_64|aarch64` (default `uname -m`) and
 A "foreign" architecture (not the host one) is emulated with QEMU user mode, so
 it needs a `binfmt_misc` entry: `qemu-linux-user` on openSUSE,
 `qemu-user-static` on Fedora/Debian/Ubuntu. Each container image and each Flatpak
-SDK is per architecture: `localhost/sticky-notes-build:ubuntu26.04-<arch>`,
-`localhost/sticky-notes-deb:debian13-<arch>`,
+SDK is per architecture: `localhost/sticky-notes-build:debian13-<arch>`,
 `localhost/sticky-notes-rpmbuild:fedora44-<arch>` and `org.kde.Sdk//6.10`
 installed with `--arch`. The scripts qualify unqualified `--image` tags with
 `localhost/` and run containers with `--pull=never`, so podman never prompts for
 an unqualified short name or pulls a different image from a configured registry.
 
+Every artifact that links the system Qt shares **one** baseline: Debian 13
+(`scripts/container/debian13.Dockerfile`, Qt 6.8.2 + LayerShellQt 6.3.4). That
+is the single build image: it compiles the portable binary (tarball, AppImage,
+`.deb` and, via `--binary`, the `.rpm`) and it carries the AppImage tooling, so
+there is no second "newer" baseline to keep in sync. The Flatpak is the only
+exception and is not a choice: `org.kde.Platform//6.10` is imposed by KDE, so it
+builds LayerShellQt 6.6 from source inside the SDK and ships its own copy.
+Changing one baseline without the others reintroduces exactly the split this
+setup removes (artifacts disagreeing on the oldest Qt they support).
+
 - `scripts/build_release.sh` builds the tarball binary with
-  `scripts/build_portable.sh` inside `scripts/container/ubuntu26.04.Dockerfile`
-  (Qt 6.10, LayerShellQt 6.6) and writes
+  `scripts/build_portable.sh` inside `scripts/container/debian13.Dockerfile`
+  (Qt 6.8, LayerShellQt 6.3.4) and writes
   `build-release-<arch>/sticky-notes`. That baseline is not cosmetic: the
   tarball does not bundle Qt, and Qt is forward compatible only. A binary built
   on the rolling host (Qt 6.12) fails on Fedora 44 (Qt 6.11.2) with
@@ -54,8 +63,9 @@ an unqualified short name or pulls a different image from a configured registry.
   architecture only); never publish a tarball built that way.
 - `scripts/build_portable.sh` gets the architecture from `--arch`, tags the
   container image with it and passes `--platform` (`linux/amd64`,
-  `linux/arm64`) only for a foreign architecture. The Qt 6.10 tripwire at the
-  end reads the ELF symbols with `readelf`, which works on a foreign binary.
+  `linux/arm64`) only for a foreign architecture. The Qt 6.8 tripwire at the
+  end reads the ELF symbols with `readelf`, which works on a foreign binary;
+  it guards every artifact, since they all package this file.
 - `scripts/build_flatpak.sh` builds
   `release/sticky-notes-<version>-<arch>.flatpak` from
   `packaging/io.github.danielearrighi.StickyNotes.yml` against
@@ -71,15 +81,14 @@ an unqualified short name or pulls a different image from a configured registry.
   host flatpak looks for the SDK in the Builder's own `~/.var/app` data). The
   build tree is `build-flatpak-<arch>/` and `--install` only applies to the
   host architecture.
-- `scripts/build_deb.sh` builds its own binary and packages it into
-  `release/sticky-notes_<version>-1_<debarch>.deb` inside
-  `scripts/container/debian13.Dockerfile` (Debian 13 trixie: Qt 6.8.2 +
-  LayerShellQt 6.3.4, `amd64` for x86_64). It does **not** reuse the portable
-  Ubuntu 26.04 binary: Qt is forward compatible, so a Qt 6.8 build installs and
-  runs on Debian 13 as well as on Ubuntu 26.04+/Debian forky (Qt 6.10), while
-  the tarball binary would abort there with `version 'Qt_6.10' not found`.
-  NoteWindow.cpp compiles out the two LayerShellQt calls added in 6.4/6.5
-  (`setDesiredSize`, `setActivateOnShow`) behind
+- `scripts/build_deb.sh` packages the portable binary into
+  `release/sticky-notes_<version>-1_<debarch>.deb` inside the shared Debian 13
+  image (trixie: Qt 6.8.2 + LayerShellQt 6.3.4, `amd64` for x86_64). It calls
+  `build_portable.sh` when no `--binary` is given, so the .deb, the tarball and
+  the .rpm ship the exact same file; Qt is forward compatible, so a Qt 6.8
+  build installs and runs on Debian 13 as well as on Ubuntu 26.04+/Debian forky
+  (Qt 6.10). NoteWindow.cpp compiles out the two LayerShellQt calls added in
+  6.4/6.5 (`setDesiredSize`, `setActivateOnShow`) behind
   `SN_HAS_LSQ_DESIRED_SIZE`/`SN_HAS_LSQ_ACTIVATE_ON_SHOW`, set from
   `LayerShellQt_VERSION` in CMakeLists.txt; on 6.3 `resize()` already
   propagates the surface size and activation-on-show does not exist. A tripwire
@@ -98,10 +107,10 @@ an unqualified short name or pulls a different image from a configured registry.
   compilation: the portable binary is staged into a source tarball and
   `packaging/sticky-notes.spec` only installs the files. Fedora and openSUSE
   naming differences are covered by rich dependencies
-  (`(qt6-qtbase >= 6.10 or libQt6Core6 >= 6.10)`,
-  `(layer-shell-qt >= 6.6 or layer-shell-qt6 >= 6.6)` and
+  (`(qt6-qtbase >= 6.8 or libQt6Core6 >= 6.8)`,
+  `(layer-shell-qt >= 6.3.4 or layer-shell-qt6 >= 6.3.4)` and
   `(qt6-sql-sqlite or qt6-qtbase)` for the QSQLITE driver); the rest, including
-  the `Qt_6.10` symbol requirement, comes from rpm's automatic ELF dependency
+  the `Qt_6.8` symbol requirement, comes from rpm's automatic ELF dependency
   generator. Do not turn the SQLite dependency into the plugin file path:
   dnf/zypper do not always load the filelists metadata and the install then
   fails with "nothing provides *.so". `%global __os_install_post %{nil}` skips
@@ -110,11 +119,10 @@ an unqualified short name or pulls a different image from a configured registry.
 - `scripts/build_all.sh` is a convenience wrapper that runs the five builds
   in canonical order (tarball, AppImage, Flatpak, deb, rpm) for every
   architecture and prints a summary with the artifact sizes. When the tarball is
-  selected it runs first and its portable binary is passed to the AppImage and
-  rpm scripts with `--binary`, so they do not compile the same sources again;
-  the deb compiles in its own Debian 13 container and the Flatpak inside the
-  SDK. The .deb and .rpm are skipped for aarch64 (they are published for x86_64
-  only). It only forwards
+  selected it runs first and its portable binary is passed to the AppImage, deb
+  and rpm scripts with `--binary`, so they do not compile the same sources
+  again; the Flatpak builds inside the SDK. The .deb and .rpm are skipped for
+  aarch64 (they are published for x86_64 only). It only forwards
   options (`--native`, `--skip-build`, `--install`, `--keep-appdir`) and can
   select targets with `--only`/`--skip` and architectures with `--archs`; with
   no options it builds x86_64 + aarch64, so QEMU must be available. Each script
@@ -125,12 +133,13 @@ an unqualified short name or pulls a different image from a configured registry.
   next run recreates them. A failed run keeps them for debugging, and `build/`
   (the development build) is never touched.
 - `scripts/build_appimage.sh` builds both architectures by default inside the
-  Ubuntu 26.04 container, in `build-appimage-<arch>/` (`APPIMAGE_EXTRACT_AND_RUN=1`,
-  no FUSE inside), against the same Qt 6.10/glibc baseline. linuxdeploy, the Qt
-  plugin and appimagetool are architecture-specific binaries that must run next
-  to the Qt they deploy, so the container is used for the native architecture
-  too; a foreign one additionally needs QEMU user emulation. A type-2 AppImage
-  header does not match the qemu binfmt ELF magic, so in an emulated container
+  Debian 13 container, in `build-appimage-<arch>/` (`APPIMAGE_EXTRACT_AND_RUN=1`,
+  no FUSE inside), against the same Qt 6.8/glibc baseline as the tarball.
+  linuxdeploy, the Qt plugin and appimagetool are architecture-specific binaries
+  that must run next to the Qt they deploy, so the container is used for the
+  native architecture too; a foreign one additionally needs QEMU user
+  emulation. A type-2 AppImage header does not match the qemu binfmt ELF magic,
+  so in an emulated container
   the script mounts the host's static qemu interpreter and runs the tools through
   it (linuxdeploy's Qt plugin is exposed as wrapper scripts for the same reason).
   `--binary PATH` reuses an existing binary (used by `build_all.sh`); `--native`
