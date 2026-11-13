@@ -24,9 +24,10 @@
 # host's static qemu interpreter and runs them through it explicitly.
 #
 # When the tarball is selected it runs first: the portable binary it builds is
-# passed to the AppImage, deb and rpm scripts with --binary, so they package the
-# same binary instead of recompiling it. The Flatpak keeps its own build inside
-# the SDK.
+# passed to the AppImage and rpm scripts with --binary, so they package the same
+# binary instead of recompiling it. The deb is the exception: it compiles in its
+# own Debian 13 container (Qt 6.8), because Debian 13 ships an older Qt than the
+# tarball baseline. The Flatpak keeps its own build inside the SDK.
 #
 # This is only a convenience wrapper: each script keeps its own requirements and
 # its own options, and is still the one to use for a single artifact. The
@@ -87,7 +88,8 @@ Options:
   -h, --help         show this help
 
 When the tarball is selected it runs first and its portable binary is reused by
-the AppImage, deb and rpm targets; the Flatpak always builds inside its SDK.
+the AppImage and rpm targets; the deb always builds inside its Debian 13
+container and the Flatpak inside its SDK.
 
 Examples:
   scripts/build_all.sh                       # x86_64 + aarch64, all targets
@@ -317,7 +319,7 @@ for arch in "${archs[@]}"; do
                     args+=(--keep-appdir)
                 fi
                 ;;
-            deb|rpm)
+            rpm)
                 if [[ -n "${portable_binary[$arch]:-}" ]]; then
                     args+=(--binary "${portable_binary[$arch]}")
                 fi
@@ -347,7 +349,7 @@ for arch in "${archs[@]}"; do
                         fi
                     fi
                     ;;
-                deb|rpm)
+                rpm)
                     if [[ -x "$root/build-release-$arch/sticky-notes" ]]; then
                         portable_binary[$arch]="$root/build-release-$arch/sticky-notes"
                     fi

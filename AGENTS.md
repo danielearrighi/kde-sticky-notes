@@ -38,6 +38,7 @@ A "foreign" architecture (not the host one) is emulated with QEMU user mode, so
 it needs a `binfmt_misc` entry: `qemu-linux-user` on openSUSE,
 `qemu-user-static` on Fedora/Debian/Ubuntu. Each container image and each Flatpak
 SDK is per architecture: `localhost/sticky-notes-build:ubuntu26.04-<arch>`,
+`localhost/sticky-notes-deb:debian13-<arch>`,
 `localhost/sticky-notes-rpmbuild:fedora44-<arch>` and `org.kde.Sdk//6.10`
 installed with `--arch`. The scripts qualify unqualified `--image` tags with
 `localhost/` and run containers with `--pull=never`, so podman never prompts for
@@ -70,18 +71,28 @@ an unqualified short name or pulls a different image from a configured registry.
   host flatpak looks for the SDK in the Builder's own `~/.var/app` data). The
   build tree is `build-flatpak-<arch>/` and `--install` only applies to the
   host architecture.
-- `scripts/build_deb.sh` packages the portable binary into
-  `release/sticky-notes_<version>-1_<debarch>.deb` inside the Ubuntu 26.04 image
-  (`amd64` for x86_64). `dpkg-shlibdeps` generates the versioned dependencies
-  from the binary's ELF symbols, but its LayerShellQt shlibs entry only reports
-  the ABI baseline (6.4.90) while the app uses APIs added in 6.6, so the script
-  pins `liblayershellqtinterface6 (>= 6.6)` explicitly. It also adds
-  `qt6-wayland` and `libqt6sql6-sqlite`: the QPA and SQLite plugins are loaded
-  at runtime, so shlibdeps cannot see them. The package installs the binary, the
-  desktop entry, every hicolor icon size, the metainfo (launchable patched to
-  `sticky-notes.desktop`) and Debian copyright/changelog files. It targets
-  Ubuntu 26.04+ and Debian forky/sid+; an older Qt is refused by the versioned
-  dependency instead of being installed and failing at startup.
+- `scripts/build_deb.sh` builds its own binary and packages it into
+  `release/sticky-notes_<version>-1_<debarch>.deb` inside
+  `scripts/container/debian13.Dockerfile` (Debian 13 trixie: Qt 6.8.2 +
+  LayerShellQt 6.3.4, `amd64` for x86_64). It does **not** reuse the portable
+  Ubuntu 26.04 binary: Qt is forward compatible, so a Qt 6.8 build installs and
+  runs on Debian 13 as well as on Ubuntu 26.04+/Debian forky (Qt 6.10), while
+  the tarball binary would abort there with `version 'Qt_6.10' not found`.
+  NoteWindow.cpp compiles out the two LayerShellQt calls added in 6.4/6.5
+  (`setDesiredSize`, `setActivateOnShow`) behind
+  `SN_HAS_LSQ_DESIRED_SIZE`/`SN_HAS_LSQ_ACTIVATE_ON_SHOW`, set from
+  `LayerShellQt_VERSION` in CMakeLists.txt; on 6.3 `resize()` already
+  propagates the surface size and activation-on-show does not exist. A tripwire
+  rejects a binary requiring more than `Qt_6.8`, so `--binary` must come from
+  that container. `dpkg-shlibdeps` resolves the versioned dependencies (Qt 6.8
+  and `liblayershellqtinterface6`); no LayerShellQt pin is forced anymore. The
+  script also adds `qt6-wayland` and `libqt6sql6-sqlite`: the QPA and SQLite
+  plugins are loaded at runtime, so shlibdeps cannot see them. The package
+  installs the binary, the desktop entry, every hicolor icon size, the metainfo
+  (launchable patched to `sticky-notes.desktop`) and Debian
+  copyright/changelog files. It targets Debian 13+ and Ubuntu 26.04+; an older
+  Qt is refused by the versioned dependency instead of being installed and
+  failing at startup.
 - `scripts/build_rpm.sh` builds `release/sticky-notes-<version>-1.<rpmarch>.rpm`
   with `rpmbuild` inside `scripts/container/fedora44.Dockerfile`. There is no
   compilation: the portable binary is staged into a source tarball and
@@ -99,10 +110,11 @@ an unqualified short name or pulls a different image from a configured registry.
 - `scripts/build_all.sh` is a convenience wrapper that runs the five builds
   in canonical order (tarball, AppImage, Flatpak, deb, rpm) for every
   architecture and prints a summary with the artifact sizes. When the tarball is
-  selected it runs first and its portable binary is passed to the AppImage, deb
-  and rpm scripts with `--binary`, so they do not compile the same sources
-  again; the Flatpak keeps its own build inside the SDK. The .deb and .rpm are
-  skipped for aarch64 (they are published for x86_64 only). It only forwards
+  selected it runs first and its portable binary is passed to the AppImage and
+  rpm scripts with `--binary`, so they do not compile the same sources again;
+  the deb compiles in its own Debian 13 container and the Flatpak inside the
+  SDK. The .deb and .rpm are skipped for aarch64 (they are published for x86_64
+  only). It only forwards
   options (`--native`, `--skip-build`, `--install`, `--keep-appdir`) and can
   select targets with `--only`/`--skip` and architectures with `--archs`; with
   no options it builds x86_64 + aarch64, so QEMU must be available. Each script

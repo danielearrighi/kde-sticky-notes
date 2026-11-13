@@ -41,6 +41,21 @@ qt_add_executable(sticky-notes
 # stay unqualified ("I18n.h" from a tab, "NotesTab.h" from the hub).
 target_include_directories(sticky-notes PRIVATE src src/tabs ${CMAKE_BINARY_DIR}/generated)
 
+# LayerShellQt 6.3 (Debian 13) predates two APIs used by the notes:
+# setDesiredSize() arrived in 6.4 and setActivateOnShow() in 6.5. Compile the
+# calls out on older versions: resize() already propagates the surface size on
+# 6.3, and activation-on-show does not exist there (and is irrelevant while the
+# keyboard interactivity is None).
+if(NOT LayerShellQt_VERSION)
+    message(FATAL_ERROR "LayerShellQt_VERSION is not set: cannot detect the available APIs")
+endif()
+if(LayerShellQt_VERSION VERSION_GREATER_EQUAL 6.4)
+    target_compile_definitions(sticky-notes PRIVATE SN_HAS_LSQ_DESIRED_SIZE)
+endif()
+if(LayerShellQt_VERSION VERSION_GREATER_EQUAL 6.5)
+    target_compile_definitions(sticky-notes PRIVATE SN_HAS_LSQ_ACTIVATE_ON_SHOW)
+endif()
+
 # Translations are one JSON file per language, embedded as Qt resources. The
 # files may not exist yet: an empty glob is fine and CONFIGURE_DEPENDS makes a
 # later build pick them up.

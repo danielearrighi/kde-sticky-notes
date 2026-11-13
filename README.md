@@ -55,10 +55,11 @@ The installer checks the runtime libraries, offers to install the missing ones w
 sudo apt install ./sticky-notes_<version>-1_amd64.deb
 ```
 
-It needs **Ubuntu 26.04+** or **Debian forky/sid+** with the system **Qt 6.10 +
-LayerShellQt 6.6** or newer; on an older release apt refuses to install it (use
-the AppImage or the Flatpak instead). Remove it with
-`sudo apt remove sticky-notes`.
+It needs **Debian 13 (trixie)+** or **Ubuntu 26.04+**: the package is built on
+Debian 13 against the system **Qt 6.8 + LayerShellQt 6.3.4** and, since Qt is
+forward compatible, the same file also runs on newer releases. On an older
+release apt refuses to install it (use the AppImage or the Flatpak instead).
+Remove it with `sudo apt remove sticky-notes`.
 
 **Fedora/openSUSE package (.rpm, x86_64)**: download
 `sticky-notes-<version>-1.x86_64.rpm` and install it:
@@ -71,12 +72,13 @@ sudo zypper install ./sticky-notes-<version>-1.x86_64.rpm  # openSUSE Tumbleweed
 It uses the system Qt 6.10 + LayerShellQt 6.6 or newer. Remove it with
 `sudo dnf remove sticky-notes` or `sudo zypper remove sticky-notes`.
 
-> **Qt version:** the tar.gz, the .deb and the .rpm use the system Qt and are
-> built against **Qt 6.10 + LayerShellQt 6.6** (the oldest versions the app
-> supports); they run on any distribution with those or newer (Fedora 44,
-> Tumbleweed, Ubuntu 26.04, Debian forky, ...). On an older Qt `install.sh`
-> stops, and apt/dnf/zypper refuse to install the package: use the AppImage or
-> the Flatpak, which bundle their own Qt.
+> **Qt version:** the tar.gz and the .rpm use the system Qt and are built
+> against **Qt 6.10 + LayerShellQt 6.6**, so they run on any distribution with
+> those or newer (Fedora 44, Tumbleweed, Ubuntu 26.04, Debian forky, ...). The
+> .deb is different: it is built on **Debian 13** against **Qt 6.8 +
+> LayerShellQt 6.3.4** and also runs on newer releases, including Qt 6.10. On an
+> older Qt `install.sh` stops, and apt/dnf/zypper refuse to install the package:
+> use the AppImage or the Flatpak, which bundle their own Qt.
 
 ## Build
 
@@ -121,21 +123,23 @@ flatpak install flathub org.kde.Sdk//6.10
 
 ### Distribution packages (.deb / .rpm)
 
-The .deb and the .rpm package the same portable binary as the tarball (system Qt
-6.10 + LayerShellQt 6.6). They are built in containers, so the host distribution
-does not matter:
+The .deb and the .rpm use the system Qt, but have different baselines. The .rpm
+packages the portable binary (Qt 6.10 + LayerShellQt 6.6); the .deb compiles
+its own binary on Debian 13 (Qt 6.8 + LayerShellQt 6.3.4) so it also installs
+there. They are built in containers, so the host distribution does not matter:
 
 ```bash
 ./scripts/build_deb.sh    # release/sticky-notes_<version>-1_amd64.deb
 ./scripts/build_rpm.sh    # release/sticky-notes-<version>-1.x86_64.rpm
 ```
 
-`build_deb.sh` runs `dpkg-shlibdeps` in the Ubuntu 26.04 image and adds the
-Wayland QPA plugin and the SQLite driver as dependencies; `build_rpm.sh` runs
-`rpmbuild` in a Fedora 44 image and generates the Fedora/openSUSE rich
-dependencies (Qt >= 6.10, LayerShellQt >= 6.6, QSQLITE). Both accept
-`--skip-build` to repackage an existing `build-release-<arch>/sticky-notes`.
-Only **x86_64** is published.
+`build_deb.sh` compiles and runs `dpkg-shlibdeps` in the Debian 13 image, then
+adds the Wayland QPA plugin and the SQLite driver as dependencies;
+`build_rpm.sh` runs `rpmbuild` in a Fedora 44 image and generates the
+Fedora/openSUSE rich dependencies (Qt >= 6.10, LayerShellQt >= 6.6, QSQLITE).
+Both accept `--skip-build` to repackage an existing binary
+(`build-deb-<arch>/build/sticky-notes` and `build-release-<arch>/sticky-notes`
+respectively). Only **x86_64** is published.
 
 ### Other architectures (aarch64)
 
@@ -154,12 +158,13 @@ The .deb and .rpm are x86_64 only: `build_all.sh` skips them for the other
 architecture. Building for the architecture you are not running needs QEMU user
 emulation (`qemu-linux-user` on openSUSE, `qemu-user-static` on
 Fedora/Debian/Ubuntu), and the Flatpak bundle needs the SDK of that architecture
-(`flatpak install --arch=aarch64 flathub org.kde.Sdk//6.10`). The tarball, the
-.deb and the AppImage are built in `scripts/container/ubuntu26.04.Dockerfile`,
-with one container image per architecture; a native aarch64 machine needs nothing
-special. The aarch64 AppImage is built against the container's Qt 6.10 instead
-of the host Qt, because linuxdeploy, its Qt plugin and appimagetool only run on
-the architecture they package.
+(`flatpak install --arch=aarch64 flathub org.kde.Sdk//6.10`). The tarball and
+the AppImage are built in `scripts/container/ubuntu26.04.Dockerfile`, the .deb
+in `scripts/container/debian13.Dockerfile`, with one container image per
+architecture; a native aarch64 machine needs nothing special. The aarch64
+AppImage is built against the container's Qt 6.10 instead of the host Qt,
+because linuxdeploy, its Qt plugin and appimagetool only run on the architecture
+they package.
 
 
 ## Install

@@ -1238,11 +1238,15 @@ void NoteWindow::configureLayerShell()
     // interacts with the note (a mouse press, see eventFilter()) or when the
     // app explicitly activates it (activate(), e.g. a new note), and it is
     // disabled again as soon as focus is lost (onFocusLayerTimeout()).
-    // Note: setActivateOnShow() has no effect while interactivity is None, so
+    // Note: activation on show has no effect while interactivity is None, so
     // notes shown at startup do not steal the focus from any window.
     m_layer->setKeyboardInteractivity(LS::KeyboardInteractivityNone);
     m_layer->setExclusiveZone(0);
+#ifdef SN_HAS_LSQ_ACTIVATE_ON_SHOW
+    // LayerShellQt 6.5+: the default is true, stated explicitly here. Without
+    // this API (6.3/6.4) QtWayland does not request activation on show either.
     m_layer->setActivateOnShow(true);
+#endif
     m_layer->setAnchors(LS::Anchors::fromInt(int(LS::AnchorTop) | int(LS::AnchorLeft)));
 }
 
@@ -1292,8 +1296,15 @@ void NoteWindow::applySize()
     const int h = m_collapsed ? kTitleHeight : m_note.h;
     // The surface also carries the transparent border used for the shadow.
     const QSize surface(m_note.w + 2 * kShadowMargin, h + 2 * kShadowMargin);
+#ifdef SN_HAS_LSQ_DESIRED_SIZE
+    // LayerShellQt 6.4+ can size the surface explicitly (needed when the window
+    // is still hidden and the platform window does not exist yet).
     if (m_layer)
         m_layer->setDesiredSize(surface);
+#endif
+    // On 6.3 resize() reaches the same set_size through
+    // QWaylandLayerSurface::setWindowGeometry(), so the size is applied there
+    // too. Keep it on every version: it also updates the QWindow size.
     resize(surface);
 }
 
@@ -1617,8 +1628,8 @@ void NoteWindow::setVisibleState(bool visible)
 void NoteWindow::activate()
 {
     ensureOnScreen();
-    // Enable keyboard interactivity before showing: setActivateOnShow() only
-    // requests activation when the surface is not None.
+    // Enable keyboard interactivity before showing: activation on show (where
+    // the compositor supports it) only happens when the surface is not None.
     setKeyboardInteractive(true);
     show();
     raise();

@@ -9,8 +9,9 @@
 #   .local/bin/sticky-notes: /lib64/libQt6Core.so.6: version `Qt_6.12' not found
 #
 # This script builds inside scripts/container/ubuntu26.04.Dockerfile
-# (Qt 6.10, LayerShellQt 6.6: the oldest versions the app supports) and writes
-# build-release-<arch>/sticky-notes. The image is built once and cached.
+# (Qt 6.10, LayerShellQt 6.6: the tarball baseline) and writes
+# build-release-<arch>/sticky-notes. The image is built once and cached. The
+# .deb does not use this binary: it builds on Debian 13, see build_deb.sh.
 #
 # --arch selects the target: the default is the host architecture. A foreign
 # architecture is emulated with QEMU user mode (binfmt_misc), so an x86_64 host
@@ -37,7 +38,7 @@ Usage: scripts/build_portable.sh [options]
 
 Builds build-release-<arch>/sticky-notes against Qt 6.10 + LayerShellQt 6.6 in a
 container (Ubuntu 26.04), so the release tarball also runs on distributions
-with a newer Qt than the build machine.
+with a newer Qt than the build machine. The .deb has its own Debian 13 build.
 
 Options:
   --arch ARCH      target architecture: x86_64 or aarch64 (default: uname -m).

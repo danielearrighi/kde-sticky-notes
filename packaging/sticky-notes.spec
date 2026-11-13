@@ -6,10 +6,10 @@
 # it comes from project(... VERSION) in CMakeLists.txt.
 #
 # The package targets x86_64 Fedora and openSUSE (only x86_64 is published).
-# The binary is linked against Qt 6.10 and LayerShellQt 6.6, the oldest versions
-# the app supports: any distribution with those or newer works. The versioned
+# The binary is linked against Qt 6.10 and LayerShellQt 6.6 (the tarball
+# baseline): any distribution with those or newer works. The versioned
 # dependencies reject an older Qt before installing a binary that would fail to
-# start.
+# start. (The .deb is separate and builds on Debian 13 against Qt 6.8.)
 
 %global __os_install_post %{nil}
 %global debug_package %{nil}

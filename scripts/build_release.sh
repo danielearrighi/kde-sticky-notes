@@ -179,10 +179,9 @@ on the target machine.
 - Qt6 runtime libraries: Core, Gui, Widgets, Sql, Network — **6.10 or newer**.
 - **LayerShellQt** (\`libLayerShellQtInterface.so\`) — **6.6 or newer**.
 
-The binary is built against Qt 6.10 and LayerShellQt 6.6, the oldest versions
-the app supports; newer ones work too. On a distribution with an older Qt
-(e.g. an older Ubuntu or Debian) use the self-contained **AppImage** or the
-**Flatpak**, which bundle their own Qt.
+The binary is built against Qt 6.10 and LayerShellQt 6.6; newer ones work too.
+On a distribution with an older Qt (e.g. an older Ubuntu or Debian) use the
+self-contained **AppImage** or the **Flatpak**, which bundle their own Qt.
 
 To check the missing libraries before launching:
 

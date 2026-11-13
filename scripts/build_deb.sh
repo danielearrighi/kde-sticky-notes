@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # Build a Debian package (.deb) for Sticky Notes.
 #
-# The binary is the same portable build the tarball uses
-# (build-release-<arch>/sticky-notes, Qt 6.10 + LayerShellQt 6.6), packaged with
-# dpkg inside the Ubuntu 26.04 container. dpkg-shlibdeps generates the runtime
-# dependencies against those libraries, so apt installs the package where Qt
-# 6.10 and LayerShellQt 6.6 exist (Ubuntu 26.04+ and Debian forky/sid). A
-# distribution with an older Qt is refused by apt instead of installing a
-# binary that would then fail to start.
+# The binary is compiled and packaged inside scripts/container/debian13.Dockerfile
+# (Debian 13 "trixie": Qt 6.8.2 + LayerShellQt 6.3.4). Building on the oldest
+# supported distribution matters because Qt is forward compatible but NOT
+# backward compatible: this single package also runs on Ubuntu 26.04+ / Debian
+# forky (Qt 6.10 + LayerShellQt 6.6). NoteWindow.cpp compiles out the two
+# LayerShellQt calls added after 6.3, and a tripwire below refuses a binary
+# that would require a newer Qt than trixie's.
+#
+# dpkg-shlibdeps generates the runtime dependencies against those libraries, so
+# apt installs the package where Qt 6.8 and LayerShellQt 6.3.4 exist and refuses
+# it on an older distribution instead of installing a binary that would then
+# fail to start. The .deb does not bundle Qt: use the AppImage or the Flatpak on
+# distributions with an older Qt.
 #
 # Produces release/sticky-notes_<version>-1_<debarch>.deb (amd64 for x86_64).
 # Only x86_64 is published, but the script accepts --arch aarch64 too (the
 # build then goes through QEMU and produces arm64).
-#
-# The binary does not bundle Qt: it is the plain release, like the tarball.
-# Use the AppImage or the Flatpak on distributions with an older Qt.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # scripts/
@@ -38,22 +41,24 @@ usage() {
     cat <<'EOF'
 Usage: scripts/build_deb.sh [options]
 
-Builds release/sticky-notes_<version>-1_<debarch>.deb in the Ubuntu 26.04
-build container (the same image as scripts/build_portable.sh, built on first
-use). The package uses the system Qt6 and LayerShellQt, like the tarball.
+Builds release/sticky-notes_<version>-1_<debarch>.deb in the Debian 13
+("trixie") build container, compiling the binary there against the system
+Qt 6.8 + LayerShellQt 6.3.4 and packaging it with dpkg. The package uses the
+system Qt6 and LayerShellQt and is installable on Debian 13 and newer.
 
 Options:
   --arch ARCH    target architecture: x86_64 or aarch64 (default: uname -m);
                  only x86_64 (amd64) is published, aarch64 needs QEMU
-  --binary PATH  reuse an existing binary (implies --skip-build)
+  --binary PATH  reuse an existing binary built in the Debian 13 container
+                 (implies --skip-build)
   --engine NAME  container engine to use (podman or docker; default: auto)
-  --skip-build   do not build the binary, reuse build-release-<arch>/sticky-notes
+  --skip-build   do not compile, reuse build-deb-<arch>/build/sticky-notes
   --clean        remove build-deb-<arch> and this architecture's .deb, then exit
   -h, --help     show this help
 
 Environment:
   CONTAINER_ENGINE          same as --engine
-  STICKY_NOTES_BUILD_IMAGE  base image tag (default: localhost/sticky-notes-build:ubuntu26.04;
+  STICKY_NOTES_DEB_IMAGE    base image tag (default: localhost/sticky-notes-deb:debian13;
                             the architecture is appended; an unqualified name
                             is treated as local)
 EOF
@@ -103,27 +108,7 @@ for size in 16 22 32 48 64 128 256; do
         || die "Missing required file: $icon_dir/sticky-notes-$size.png"
 done
 
-# --- 1. Release binary ------------------------------------------------------
-
-if [[ -n "$binary_override" ]]; then
-    binary="$binary_override"
-    [[ -x "$binary" ]] || die "Binary not found: $binary"
-    log "Using $binary"
-else
-    # Portable build against Qt 6.10 + LayerShellQt 6.6 (see build_portable.sh).
-    binary="$root/build-release-$arch/sticky-notes"
-    portable_args=(--arch "$arch")
-    ((skip_build)) && portable_args+=(--skip-build)
-    [[ -n "$engine" ]] && portable_args+=(--engine "$engine")
-    "$here/build_portable.sh" "${portable_args[@]}"
-    log "Using $binary"
-fi
-[[ -x "$binary" ]] || die "Binary not found: $binary"
-sn_verify_binary_arch "$binary" "$arch"
-log "Version: $version"
-log "Architecture: $arch (Debian: $debarch)"
-
-# --- 2. Container -----------------------------------------------------------
+# --- 1. Container -----------------------------------------------------------
 
 if [[ -z "$engine" ]]; then
     engine="${CONTAINER_ENGINE:-}"
@@ -133,9 +118,9 @@ if [[ -z "$engine" ]]; then
 fi
 command -v "$engine" >/dev/null 2>&1 || die "Container engine not found: $engine"
 
-image_base="${STICKY_NOTES_BUILD_IMAGE:-localhost/sticky-notes-build:ubuntu26.04}"
+image_base="${STICKY_NOTES_DEB_IMAGE:-localhost/sticky-notes-deb:debian13}"
 image="$(sn_local_image "$image_base-$arch")"
-dockerfile="$here/container/ubuntu26.04.Dockerfile"
+dockerfile="$here/container/debian13.Dockerfile"
 
 sn_require_binfmt "$arch"
 platform_args=()
@@ -152,6 +137,42 @@ if [[ "$engine" == "podman" ]]; then
     run_args+=(--userns=keep-id)
 else
     run_args+=(--user "$(id -u):$(id -g)")
+fi
+
+# --- 2. Release binary ------------------------------------------------------
+
+# Compiled here, not with build_portable.sh: the tarball baseline (Ubuntu 26.04,
+# Qt 6.10) would make the package uninstallable on Debian 13. Qt is forward
+# compatible, so this Qt 6.8 binary also runs on Ubuntu 26.04+.
+binbuild_rel="build-deb-$arch/build"
+binary="$root/$binbuild_rel/sticky-notes"
+
+if [[ -n "$binary_override" ]]; then
+    binary="$binary_override"
+    log "Using $binary"
+elif ((skip_build)); then
+    log "Reusing $binary"
+else
+    log "Building the binary in $image (Debian 13: Qt 6.8 + LayerShellQt 6.3)"
+    if ! "$engine" run "${run_args[@]}" "$image" bash -lc \
+            "cmake -S /work -B '/work/$binbuild_rel' -G Ninja -DCMAKE_BUILD_TYPE=Release \
+             && cmake --build '/work/$binbuild_rel'"; then
+        die "Compilation failed"
+    fi
+    log "Using $binary"
+fi
+[[ -x "$binary" ]] || die "Binary not found: $binary"
+sn_verify_binary_arch "$binary" "$arch"
+log "Version: $version"
+log "Architecture: $arch (Debian: $debarch)"
+
+# The package must install on Debian 13: a binary built against a newer Qt fails
+# there with "version 'Qt_6.x' not found". The highest Qt_x.y version tag in the
+# binary is the floor, so check it before packaging (this also catches --binary
+# pointing at a non-trixie build).
+max_qt="$(readelf -V "$binary" 2>/dev/null | grep -o 'Qt_6\.[0-9][0-9]*' | sort -Vu | tail -1 || true)"
+if [[ "$max_qt" != "Qt_6.8" ]]; then
+    die "Binary requires ${max_qt:-an unknown Qt version}, expected Qt_6.8: build it in the Debian 13 container"
 fi
 
 # --- 3. Staging folder ------------------------------------------------------
@@ -257,14 +278,14 @@ depends="$(sed -n 's/^shlibs:Depends=//p' "$deps_out" | tail -1)"
 # driver that Storage needs.
 depends+=", qt6-wayland, libqt6sql6-sqlite"
 
-# dpkg-shlibdeps only sees the LayerShellQt soname, and its shlibs entry reports
-# the ABI baseline (>= 6.4.90), not the API version the app uses. The app calls
-# setDesiredSize()/setActivateOnShow(), added in 6.6, so pin the real minimum
-# explicitly. Qt itself is already pinned by dpkg-shlibdeps (>= 6.10).
+# dpkg-shlibdeps only sees the LayerShellQt soname, and the trixie shlibs entry
+# reports the ABI baseline (>= 6.1.0), not the API version the app is built
+# against. Pin 6.3.4 (the version in Debian 13): older releases are untested and
+# the two APIs added after 6.3 are compiled out (see CMakeLists.txt).
 if [[ "$depends" == *"liblayershellqtinterface6"* ]]; then
-    depends="$(sed -E 's/liblayershellqtinterface6( \(>= [^)]*\))?/liblayershellqtinterface6 (>= 6.6)/' <<<"$depends")"
+    depends="$(sed -E 's/liblayershellqtinterface6( \(>= [^)]*\))?/liblayershellqtinterface6 (>= 6.3.4)/' <<<"$depends")"
 else
-    depends+=", liblayershellqtinterface6 (>= 6.6)"
+    depends+=", liblayershellqtinterface6 (>= 6.3.4)"
 fi
 
 installed_size="$(du -sk --exclude=DEBIAN "$stage" | cut -f1)"

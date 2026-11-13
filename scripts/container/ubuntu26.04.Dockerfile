@@ -1,9 +1,10 @@
 # Build environment for the release artifacts that are built in a container:
 # the plain (tarball) binary and the AppImage.
 #
-# Ubuntu 26.04 ships Qt 6.10.2 and LayerShellQt 6.6.4: the oldest versions that
-# still provide the layer-shell API the notes use (setDesiredSize() and
-# setActivateOnShow(), added in LayerShellQt 6.6, which itself needs Qt 6.10).
+# Ubuntu 26.04 ships Qt 6.10.2 and LayerShellQt 6.6.4: the baseline the tarball
+# and the AppImage are built against. The .deb is built separately on Debian 13
+# (Qt 6.8 + LayerShellQt 6.3.4, see debian13.Dockerfile), where the two
+# LayerShellQt calls added in 6.4/6.5 are compiled out.
 #
 # Qt is forward compatible but NOT backward compatible: a binary built against
 # Qt 6.12 (Tumbleweed) refuses to start on a system with Qt 6.11 (Fedora 44)
