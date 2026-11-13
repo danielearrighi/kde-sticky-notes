@@ -23,6 +23,7 @@
   "app.quit": "Quitter l'application",
   "app.close_to_tray": "Fermer vers la zone de notification",
   "app.tray_show": "Afficher la fenêtre principale",
+  "app.tray_close": "Fermer la fenêtre principale",
   "app.tray_show_notes": "Afficher les notes",
   "app.tray_hide_notes": "Masquer les notes",
   "app.db_error": "Impossible d'ouvrir la base de données :\n%1",

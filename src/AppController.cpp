@@ -513,6 +513,18 @@ void AppController::setupTray()
     auto *menu = new QMenu(m_hub);
     QAction *show = menu->addAction(I18n::t(QStringLiteral("app.tray_show")));
     connect(show, &QAction::triggered, this, &AppController::showHub);
+    QAction *closeHub = menu->addAction(I18n::t(QStringLiteral("app.tray_close")));
+    connect(closeHub, &QAction::triggered, this, [this] {
+        if (m_hub)
+            m_hub->hide();
+    });
+    // Only a hub currently on screen can be closed. The state is evaluated
+    // when the menu opens: the hub can be hidden or minimized behind our back.
+    connect(menu, &QMenu::aboutToShow, this, [this, closeHub] {
+        const bool open = m_hub && m_hub->isVisible()
+                          && !(m_hub->windowState() & Qt::WindowMinimized);
+        closeHub->setEnabled(open);
+    });
     menu->addSeparator();
     QAction *showNotes = menu->addAction(I18n::t(QStringLiteral("app.tray_show_notes")));
     connect(showNotes, &QAction::triggered, this, &AppController::showAllNotes);
