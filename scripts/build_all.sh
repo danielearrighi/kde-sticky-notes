@@ -34,6 +34,12 @@
 # builds are independent, so a failure does not stop the others with
 # --keep-going; by default the script stops at the first failure.
 #
+# A successful run then deletes the per-target build trees (build-release-*,
+# build-appimage-*, build-flatpak-*, build-deb-*, build-rpm-*): they are caches,
+# the published files are all in release/, and the next run recreates a missing
+# tree from scratch. A failed run keeps them so the error can be inspected and
+# a rerun stays incremental.
+#
 # Usage: scripts/build_all.sh [options]
 set -euo pipefail
 
@@ -91,6 +97,10 @@ When the tarball is selected it runs first and its portable binary is reused by
 the AppImage and rpm targets; the deb always builds inside its Debian 13
 container and the Flatpak inside its SDK.
 
+After a successful run the build trees (build-release-*, build-appimage-*,
+build-flatpak-*, build-deb-*, build-rpm-*) are removed: they are only caches,
+the artifacts stay in release/. A failed run keeps them for debugging.
+
 Examples:
   scripts/build_all.sh                       # x86_64 + aarch64, all targets
   scripts/build_all.sh --archs x86_64        # only the host architecture
@@ -103,6 +113,26 @@ EOF
 
 die() { printf 'build_all: %s\n' "$*" >&2; exit 1; }
 log() { printf '[build_all] %s\n' "$*"; }
+
+# Remove the per-target build trees left by the scripts. They are pure caches:
+# release/ holds every artifact and a missing tree is recreated by the next
+# build. build/ is the ordinary development build and is deliberately not
+# matched (the globs are the build-<target> names, not build-*).
+clean_build_trees() {
+    local dir size
+    local -a trees=()
+    for dir in "$root"/build-release* "$root"/build-appimage* \
+               "$root"/build-flatpak* "$root"/build-deb* "$root"/build-rpm*; do
+        if [[ -d "$dir" ]]; then
+            trees+=("$dir")
+        fi
+    done
+    ((${#trees[@]})) || return 0
+    size="$(du -shc "${trees[@]}" 2>/dev/null | tail -1 | cut -f1 || true)"
+    [[ "$size" == "0" ]] && size=""
+    log "Removing the build trees${size:+ ($size)}; the artifacts stay in $release_dir"
+    rm -rf "${trees[@]}"
+}
 
 while (($#)); do
     case "$1" in
@@ -395,8 +425,11 @@ done
 if ((${#failed[@]})); then
     printf '\n'
     log "Failed: ${failed[*]}"
+    log "Keeping the build trees: fix the error and rerun to reuse them"
     exit 1
 fi
+
+clean_build_trees
 
 printf '\n'
 log "Every requested artifact is ready: scripts/create_release.sh uploads what is in release/"

@@ -119,6 +119,11 @@ an unqualified short name or pulls a different image from a configured registry.
   select targets with `--only`/`--skip` and architectures with `--archs`; with
   no options it builds x86_64 + aarch64, so QEMU must be available. Each script
   stays the one to use for a single artifact and keeps its own requirements.
+  After a successful run it deletes the per-target build trees
+  (`build-release-*`, `build-appimage-*`, `build-flatpak-*`, `build-deb-*`,
+  `build-rpm-*`): they are only caches, the artifacts stay in `release/` and the
+  next run recreates them. A failed run keeps them for debugging, and `build/`
+  (the development build) is never touched.
 - `scripts/build_appimage.sh` builds both architectures by default inside the
   Ubuntu 26.04 container, in `build-appimage-<arch>/` (`APPIMAGE_EXTRACT_AND_RUN=1`,
   no FUSE inside), against the same Qt 6.10/glibc baseline. linuxdeploy, the Qt
